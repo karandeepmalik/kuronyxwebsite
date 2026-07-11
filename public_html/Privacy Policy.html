@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Privacy Policy — Kuronyx Sciences Pvt. Ltd.</title>
+<meta name="description" content="Privacy Policy of Kuronyx Sciences Private Limited, in compliance with the Digital Personal Data Protection Act, 2023." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,200;8..60,300;8..60,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --navy:   #22384A;
+    --mid:    #38454E;
+    --teal:   #58959D;
+    --paper:  #F5F5F5;
+    --paper-2:#F5F5F5cc;
+    --paper-3:#F5F5F580;
+    --paper-4:#F5F5F540;
+    --rule:   #F5F5F520;
+    --rule-2: #F5F5F510;
+    --serif:  "Source Serif 4", Georgia, serif;
+    --mono:   "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+    --gutter: clamp(1.25rem, 4vw, 3rem);
+  }
+
+  *,*::before,*::after{ margin:0; padding:0; box-sizing:border-box; }
+  html,body{ background: var(--navy); color: var(--paper); }
+  body{
+    font-family: var(--serif); font-weight: 300;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    line-height: 1.55;
+  }
+  ::selection{ background: var(--teal); color: #0c161e; }
+
+  /* faint baseline grid */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background-image: linear-gradient(to right, var(--rule-2) 1px, transparent 1px);
+    background-size: 8.333% 100%;
+    opacity:.55;
+  }
+
+  /* header chrome */
+  header.chrome{
+    position: sticky; top:0;
+    background: linear-gradient(to bottom, rgba(34,56,74,0.96), rgba(34,56,74,0.7));
+    -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    padding: 1.1rem var(--gutter);
+    display: grid; grid-template-columns: 1fr auto;
+    align-items: center;
+    z-index: 10;
+    border-bottom: 1px solid var(--rule);
+  }
+  .wordmark{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.875rem; letter-spacing: 0.02em;
+    color: var(--paper); text-decoration: none;
+    text-transform: lowercase;
+  }
+  .wordmark .glyph{ color: var(--teal); }
+  .back{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-3); text-decoration: none;
+    display: inline-flex; align-items: center; gap: 0.5rem;
+    transition: color .25s ease;
+  }
+  .back:hover{ color: var(--paper); }
+  .back .arr{ color: var(--teal); }
+
+  /* page layout */
+  main{
+    position: relative; z-index: 2;
+    padding: clamp(2.5rem, 6vh, 5rem) var(--gutter) clamp(3rem, 8vh, 6rem);
+  }
+  .wrap{ max-width: 44rem; margin: 0 auto; }
+
+  /* doc head */
+  .doc-eyebrow{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-3);
+    margin-bottom: 1.25rem;
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .doc-eyebrow::before{
+    content:""; display:inline-block; width: 14px; height: 1px; background: var(--teal);
+  }
+
+  h1.doc-title{
+    font-family: var(--serif); font-weight: 200;
+    font-size: clamp(2rem, 4vw + 0.5rem, 3.25rem);
+    line-height: 1.08;
+    letter-spacing: -0.022em;
+    margin-bottom: 0.6rem;
+  }
+  .doc-meta{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-4);
+    padding-bottom: 1.6rem;
+    border-bottom: 1px solid var(--rule);
+    margin-bottom: 2.25rem;
+  }
+  .doc-meta .sep{ color: var(--paper-4); margin: 0 0.5rem; }
+
+  /* intro / lead */
+  .lead{
+    font-family: var(--serif); font-weight: 300;
+    font-size: 1rem;
+    color: var(--paper-2);
+    margin-bottom: 1.05em;
+    text-wrap: pretty;
+  }
+  .lead + .lead{ margin-top: 0.4em; }
+
+  /* sections */
+  section.doc{ margin-top: 2.5rem; }
+  section.doc h2{
+    font-family: var(--mono); font-weight: 500;
+    font-size: 0.6875rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper);
+    margin-bottom: 1rem;
+    display: grid;
+    grid-template-columns: 2.75rem 1fr;
+    column-gap: 1rem;
+    align-items: baseline;
+    padding-bottom: 0.55rem;
+    border-bottom: 1px solid var(--rule);
+  }
+  section.doc h2 .n{
+    color: var(--teal);
+    font-weight: 400;
+    letter-spacing: 0.22em;
+  }
+  section.doc p{
+    font-size: 0.875rem;
+    line-height: 1.65;
+    color: var(--paper-2);
+    margin-bottom: 0.85em;
+    text-wrap: pretty;
+  }
+  section.doc ul{
+    list-style: none;
+    margin: 0.4em 0 1.1em 0;
+    padding: 0;
+  }
+  section.doc ul li{
+    position: relative;
+    padding-left: 1.4rem;
+    margin-bottom: 0.55em;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: var(--paper-2);
+    text-wrap: pretty;
+  }
+  section.doc ul li::before{
+    content: "—";
+    position: absolute; left: 0; top: 0;
+    color: var(--teal);
+    font-family: var(--mono);
+  }
+  section.doc strong{
+    color: var(--paper);
+    font-weight: 400;
+    font-style: italic;
+  }
+  section.doc .kv{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.75rem; letter-spacing: 0.04em;
+    color: var(--paper-2);
+    margin: 0.6em 0;
+  }
+  section.doc .kv b{
+    color: var(--paper-3);
+    font-weight: 400;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    font-size: 0.625rem;
+    display: inline-block;
+    min-width: 8.5rem;
+  }
+  section.doc a{
+    color: var(--paper);
+    text-decoration: none;
+    border-bottom: 1px solid var(--paper-3);
+    transition: border-color .2s ease;
+  }
+  section.doc a:hover{ border-bottom-color: var(--teal); }
+
+  /* footer */
+  footer.foot{
+    position: relative; z-index: 2;
+    border-top: 1px solid var(--rule);
+    padding: 2rem var(--gutter);
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    gap: 1rem;
+    align-items: center;
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--paper-3);
+  }
+  footer.foot .legal{ justify-self: start; }
+  footer.foot .domain{ justify-self: center; }
+  footer.foot .place{ justify-self: end; }
+  footer.foot a{
+    color: var(--paper-2); text-decoration: none;
+    border-bottom: 1px solid var(--rule);
+    transition: color .25s ease, border-color .25s ease;
+  }
+  footer.foot a:hover{ color: var(--paper); border-bottom-color: var(--teal); }
+  @media (max-width: 720px){
+    footer.foot{ grid-template-columns: 1fr; justify-items: start; gap: 0.5rem; }
+    footer.foot > *{ justify-self: start !important; }
+  }
+
+  .stamp{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-4);
+    text-align: center;
+    margin-top: 3.5rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+</style>
+</head>
+<body>
+
+<header class="chrome">
+  <a class="wordmark" href="./index.html" aria-label="Kuronyx — home">kurony<span class="glyph">✗</span></a>
+  <a class="back" href="./index.html"><span class="arr">←</span> Back to site</a>
+</header>
+
+<main>
+  <div class="wrap">
+
+    <p class="doc-eyebrow">Legal · DPDP Act, 2023</p>
+    <h1 class="doc-title">Privacy Policy</h1>
+    <p class="doc-meta">
+      Kuronyx Sciences Private Limited<span class="sep">·</span>Effective May 22, 2026
+    </p>
+
+    <p class="lead">
+      Kuronyx Sciences Private Limited (“Kuronyx”, “we”, “our”, or “us”), a DPIIT Startup India-recognised pharmaceutical compounding company based in Mumbai, India, is profoundly committed to safeguarding the privacy and personal data of individuals who visit our website, kuronyx.in, and interact with our services. This Privacy Policy elucidates the comprehensive framework governing how we collect, utilise, store, and protect your personal information, in strict adherence to the Digital Personal Data Protection Act, 2023 (“DPDP Act, 2023”) and other applicable Indian laws.
+    </p>
+    <p class="lead">
+      By accessing or using our website, subscribing to our newsletter, submitting a contact form, or otherwise interacting with our services, you unequivocally consent to the practices described in this policy. We urge you to review this document thoroughly to understand our data protection commitments.
+    </p>
+
+    <section class="doc">
+      <h2><span class="n">01</span><span>Who we are</span></h2>
+      <p>Kuronyx Sciences Private Limited is a pharmaceutical compounding company dedicated to providing specialised medicinal solutions. Our commitment extends beyond pharmaceutical excellence to ensuring the highest standards of data privacy and security for all data principals.</p>
+      <p class="kv"><b>Registered address</b> Unit No. 2, 4th Floor, A Wing, Time Square Building, Marol Naka, Andheri East, Mumbai – 400059, Maharashtra, India.</p>
+      <p class="kv"><b>Contact email</b> <a href="mailto:ops@kuronyx.in">ops@kuronyx.in</a></p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">02</span><span>Definitions</span></h2>
+      <p>For the purposes of this Privacy Policy, the following terms shall have the meanings ascribed to them under the Digital Personal Data Protection Act, 2023:</p>
+      <ul>
+        <li><strong>“Data Principal”</strong> refers to the individual to whom the personal data relates.</li>
+        <li><strong>“Data Fiduciary”</strong> refers to Kuronyx Sciences Private Limited, which alone or in conjunction with other persons determine the purpose and means of processing of personal data.</li>
+        <li><strong>“Personal Data”</strong> means any data about an individual who is identifiable by or in relation to such data.</li>
+        <li><strong>“Processing”</strong> means an automated operation or set of operations performed on digital personal data, and includes operations such as collection, storage, retrieval, use, adaptation, disclosure by transmission, dissemination or otherwise making available, restriction, structuring, erasure or destruction.</li>
+        <li><strong>“Consent”</strong> means any unconditional, specific, informed, and unambiguous indication of the Data Principal's wishes by which they, by a clear affirmative action, signify their agreement to the processing of their personal data for a specified purpose.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">03</span><span>Information we collect</span></h2>
+      <p>We collect various categories of personal data to provide and improve our services, ensuring that such collection is limited to what is necessary for the stated purposes (data minimisation principle). The information collected includes:</p>
+      <ul>
+        <li><strong>Contact information:</strong> name, email address, and phone number, primarily collected when you engage with us for enquiries or service requests.</li>
+        <li><strong>Professional information:</strong> details such as your job title, the name of your clinic or hospital, and your city, which assists us in understanding your professional needs and tailoring our outreach.</li>
+        <li><strong>Communication data:</strong> any messages or content you share with us via our website's contact form or through direct communication channels.</li>
+        <li><strong>Newsletter subscription data:</strong> your email address, specifically collected for the purpose of sending you our newsletters, only upon your explicit subscription.</li>
+        <li><strong>Website usage data:</strong> non-personally identifiable information related to your interaction with our website, such as pages visited, browser type, device information, and IP address, collected to enhance user experience and website functionality.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">04</span><span>How we use your information</span></h2>
+      <p>Your personal data is processed strictly for specified, explicit, and lawful purposes, ensuring transparency and accountability. The purposes for which we use your information include:</p>
+      <ul>
+        <li><strong>To respond to enquiries:</strong> to address and respond to your queries, requests, or feedback submitted via our contact form.</li>
+        <li><strong>To send newsletters:</strong> to deliver our periodic newsletters containing updates, insights, and relevant information, exclusively to individuals who have subscribed.</li>
+        <li><strong>To engage with veterinary professionals:</strong> to follow up with veterinary professionals who have expressed interest in our services, fostering professional relationships.</li>
+        <li><strong>To improve our website and marketing efforts:</strong> to analyse website usage patterns and user preferences, enabling us to enhance our website's functionality, content, and the effectiveness of our marketing strategies.</li>
+        <li><strong>To comply with applicable laws:</strong> to fulfil our legal and regulatory obligations under Indian law, including but not limited to the DPDP Act, 2023, and other relevant statutes.</li>
+        <li><strong>For internal record keeping:</strong> to maintain accurate and organised records of our interactions and operations, essential for business administration and compliance.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">05</span><span>Legal basis for processing</span></h2>
+      <p>We process your personal data based on the following legal grounds, as stipulated by the DPDP Act, 2023:</p>
+      <ul>
+        <li><strong>Consent:</strong> we rely on your explicit consent when you submit a form or subscribe to our newsletter. Your consent is freely given, specific, informed, and unambiguous, and you have the right to withdraw it at any time.</li>
+        <li><strong>Legitimate interests:</strong> we process certain data based on our legitimate interests, such as communicating with veterinary professionals who have shown interest in our services, improving our website, and enhancing our marketing efforts, provided that such interests do not override your fundamental rights and freedoms.</li>
+        <li><strong>Legal obligation:</strong> we process your data where it is necessary to comply with a legal obligation imposed upon us by Indian law, including responding to lawful requests from public authorities.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">06</span><span>Data security and protection</span></h2>
+      <p>Kuronyx is committed to implementing robust technical and organisational measures to protect your personal data from unauthorised access, disclosure, alteration, and destruction. Our security protocols are regularly reviewed and updated to ensure the highest level of data protection.</p>
+      <ul>
+        <li><strong>Secure storage:</strong> your data is stored on secure servers with restricted access, ensuring that only authorised Kuronyx team members have access to personal information on a need-to-know basis.</li>
+        <li><strong>Access controls:</strong> we employ stringent access controls, including multi-factor authentication and role-based access, to limit data access to personnel who require it for their legitimate duties.</li>
+        <li><strong>Data encryption:</strong> where appropriate, data is encrypted both in transit and at rest to prevent interception and unauthorised access.</li>
+        <li><strong>Internal policies:</strong> we maintain comprehensive internal data protection policies and conduct regular training for our employees to ensure adherence to best practices in data handling and security.</li>
+        <li><strong>No sale or trade:</strong> we unequivocally state that we do not sell, rent, or trade your personal information to third parties for their marketing purposes.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">07</span><span>Data retention</span></h2>
+      <p>We retain your personal data only for as long as necessary to fulfil the purposes for which it was collected, or as required by applicable laws and regulations. Once the purpose is served, or the legal retention period expires, your data will be securely deleted or anonymised. You may request the deletion of your data by contacting us at <a href="mailto:ops@kuronyx.in">ops@kuronyx.in</a>.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">08</span><span>Disclosure to third parties</span></h2>
+      <p>We may engage third-party service providers to assist us in operating our website and delivering our services. These third parties are contractually bound to protect your data and are prohibited from using it for any purpose other than providing services to Kuronyx. The third-party services we utilise include:</p>
+      <ul>
+        <li><strong>Analytics tools:</strong> to gather insights into website usage and performance, helping us improve our services. These tools typically process data in an aggregated and anonymised form.</li>
+      </ul>
+      <p>We will only disclose your personal data to third parties if:</p>
+      <ul>
+        <li>You have given your explicit consent.</li>
+        <li>It is necessary for the performance of a contract with you.</li>
+        <li>It is required by law or a governmental authority.</li>
+        <li>It is necessary to protect our rights, property, or safety, or the rights, property, or safety of others.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">09</span><span>Your rights as a data principal</span></h2>
+      <p>Under the Digital Personal Data Protection Act, 2023, you, as a Data Principal, are endowed with several fundamental rights concerning your personal data. Kuronyx is committed to facilitating the exercise of these rights:</p>
+      <ul>
+        <li><strong>Right to access:</strong> you have the right to obtain confirmation from us as to whether or not personal data concerning you is being processed, and, where that is the case, access to the personal data.</li>
+        <li><strong>Right to correction and erasure:</strong> you have the right to request the correction of inaccurate or misleading personal data and the completion of incomplete personal data. You also have the right to request the deletion or erasure of your personal data under certain circumstances.</li>
+        <li><strong>Right to grievance redressal:</strong> you have the right to have your grievances redressed by a Grievance Officer, as detailed in Section 14 of this policy.</li>
+        <li><strong>Right to nominate:</strong> you have the right to nominate another individual to exercise your rights in the event of your death or incapacity.</li>
+        <li><strong>Right to withdraw consent:</strong> you have the right to withdraw your consent at any time, where processing is based on consent, without affecting the lawfulness of processing based on consent before its withdrawal.</li>
+        <li><strong>Right to unsubscribe:</strong> you can unsubscribe from our newsletter at any time by following the instructions provided in the newsletter itself.</li>
+      </ul>
+      <p>To exercise any of these rights, please contact us at <a href="mailto:ops@kuronyx.in">ops@kuronyx.in</a>. We will respond to your request in accordance with the DPDP Act, 2023.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">10</span><span>Cookies and tracking technologies</span></h2>
+      <p>Our website may utilise cookies and similar tracking technologies to enhance your browsing experience, analyse website traffic, and understand user behaviour. Cookies are small text files placed on your device.</p>
+      <ul>
+        <li><strong>Purpose of cookies:</strong> we use cookies to remember your preferences, track website usage, and improve the overall functionality and content of our site.</li>
+        <li><strong>Managing cookies:</strong> you have the option to accept or decline cookies. Most web browsers automatically accept cookies, but you can usually modify your browser setting to decline cookies if you prefer. Disabling cookies may, however, affect the functionality of our website.</li>
+      </ul>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">11</span><span>Links to other websites</span></h2>
+      <p>Our website may contain links to third-party websites that are not operated by us. We have no control over, and assume no responsibility for the content, privacy policies, or practices of any third-party sites or services. We encourage you to review the privacy policies of any third-party websites you visit.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">12</span><span>Children's privacy</span></h2>
+      <p>Our services are not directed to individuals under the age of eighteen (18) years. We do not knowingly collect personal data from children. If we become aware that we have inadvertently collected personal data from a child without verifiable parental consent, we will take immediate steps to delete such information from our records.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">13</span><span>Changes to this Privacy Policy</span></h2>
+      <p>Kuronyx reserves the right to update or modify this Privacy Policy periodically to reflect changes in our data processing practices or legal requirements. Any changes will be effective immediately upon posting the revised policy on this page, with an updated “Effective Date.” We encourage you to review this policy regularly to stay informed about how we are protecting your information.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">14</span><span>Grievance redressal mechanism</span></h2>
+      <p>In compliance with the Digital Personal Data Protection Act, 2023, Kuronyx has appointed a Grievance Officer to address any concerns or grievances you may have regarding the processing of your personal data.</p>
+      <p class="kv"><b>Grievance Officer</b> Farheen Mohiuddin</p>
+      <p class="kv"><b>Email</b> <a href="mailto:ops@kuronyx.in">ops@kuronyx.in</a></p>
+      <p>Please direct any questions, concerns, or requests regarding this Privacy Policy or your personal data to our Grievance Officer. We are committed to resolving your grievances in a timely and efficient manner.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">15</span><span>Governing law and jurisdiction</span></h2>
+      <p>This Privacy Policy shall be governed by and construed in accordance with the laws of India, particularly the Digital Personal Data Protection Act, 2023. Any disputes arising out of or in connection with this policy shall be subject to the exclusive jurisdiction of the courts in Mumbai, Maharashtra, India.</p>
+    </section>
+
+    <section class="doc">
+      <h2><span class="n">16</span><span>Contact us</span></h2>
+      <p>For any further questions or clarifications regarding this Privacy Policy or our data practices, please do not hesitate to contact us:</p>
+      <p class="kv"><b>Email</b> <a href="mailto:ops@kuronyx.in">ops@kuronyx.in</a></p>
+      <p class="kv"><b>Address</b> Kuronyx Sciences Private Limited, Unit No. 2, 4th Floor, A Wing, Time Square Building, Marol Naka, Andheri East, Mumbai – 400059, Maharashtra, India.</p>
+    </section>
+
+    <p class="stamp">Kuronyx Sciences Private Limited · Confidential</p>
+  </div>
+</main>
+
+<footer class="foot">
+  <span class="legal">© 2026 Kuronyx Sciences Pvt. Ltd.</span>
+  <span class="domain"><a href="./index.html">Back to site</a> · kuronyx.in</span>
+  <span class="place">Mumbai · India · IST</span>
+</footer>
+
+</body>
+</html>

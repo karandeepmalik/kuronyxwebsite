@@ -1,0 +1,1195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Kuronyx — The dark matter of Indian veterinary medicine</title>
+<meta name="description" content="Kuronyx Speciality Pharmacy. India's first veterinary-only compounding and import pharmacy. Prescription only." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,200;8..60,300;8..60,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --navy:    #22384A;
+    --mid:     #38454E;
+    --teal:    #58959D;
+    --paper:   #F5F5F5;
+    --paper-2: #F5F5F5cc;
+    --paper-3: #F5F5F580;
+    --paper-4: #F5F5F540;
+    --rule:    #F5F5F520;
+    --rule-2:  #F5F5F510;
+
+    --serif: "Source Serif 4", Georgia, serif;
+    --mono:  "JetBrains Mono", ui-monospace, "SFMono-Regular", monospace;
+
+    --measure: 34rem;
+    --gutter: clamp(1.5rem, 4vw, 3.5rem);
+    --rail-w: clamp(3.25rem, 5.2vw, 4.75rem);   /* left telemetry rail */
+    --right-w: clamp(3.25rem, 5.2vw, 4.75rem);  /* right marker rail */
+    --section-y: clamp(7rem, 17vh, 12rem);
+  }
+
+  *,*::before,*::after{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  html{ background:var(--navy); color:var(--paper); -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+  body{
+    font-family:var(--serif);
+    font-weight:300;
+    font-size:clamp(1.0625rem, 0.62vw + 0.95rem, 1.1875rem);
+    line-height:1.62;
+    letter-spacing:0.005em;
+    background:var(--navy);
+    color:var(--paper);
+    overflow-x:hidden;
+  }
+  ::selection{ background:var(--teal); color:#0c161e; }
+
+  /* ——— faint baseline grid (very low contrast) ——— */
+  body::before{
+    content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
+    background-image:
+      linear-gradient(to right, var(--rule-2) 1px, transparent 1px);
+    background-size: 8.333% 100%;   /* 12-col field */
+    background-position: 0 0;
+    mix-blend-mode: normal;
+    opacity:.6;
+  }
+
+  /* ——— corner ticks framing the viewport (mission-control) ——— */
+  .frame-tick{ position:fixed; width:18px; height:18px; z-index:40; pointer-events:none; opacity:.55;}
+  .frame-tick::before, .frame-tick::after{
+    content:""; position:absolute; background:var(--paper-3);
+  }
+  .frame-tick::before{ width:100%; height:1px; top:0; left:0; }
+  .frame-tick::after { width:1px; height:100%; top:0; left:0; }
+  .frame-tick.tl{ top:1.1rem; left:1.1rem; }
+  .frame-tick.tr{ top:1.1rem; right:1.1rem; transform:scaleX(-1); }
+  .frame-tick.bl{ bottom:1.1rem; left:1.1rem; transform:scaleY(-1); }
+  .frame-tick.br{ bottom:1.1rem; right:1.1rem; transform:scale(-1,-1); }
+  @media (max-width:720px){ .frame-tick{ display:none; } }
+
+  /* ——————————————————————————— top chrome ——————————————————————————— */
+  header.chrome{
+    position:fixed; inset:0 0 auto 0;
+    display:grid; grid-template-columns: 1fr 1fr 1fr;
+    align-items:center;
+    padding: 1.4rem var(--gutter);
+    z-index:50;
+    pointer-events:none;
+    background: linear-gradient(to bottom, rgba(34,56,74,0.92), rgba(34,56,74,0.4) 70%, transparent);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  @media (max-width:720px){
+    header.chrome{
+      grid-template-columns: 1fr auto;
+      padding: 1rem var(--gutter);
+    }
+    header.chrome .center-readout{ display:none; }
+    header.chrome .meta .sep, header.chrome .meta #clock{ display:none; }
+    header.chrome .meta{ font-size: 0.6rem; }
+  }
+  header.chrome > *{ pointer-events:auto; }
+  header.chrome::after{
+    content:""; position:absolute; left:var(--gutter); right:var(--gutter); bottom:0;
+    height:1px; background:var(--rule);
+    transform:scaleX(0); transform-origin:left center;
+    transition: transform 1.4s cubic-bezier(.2,.6,.2,1) .2s;
+  }
+  body.loaded header.chrome::after{ transform:scaleX(1); }
+
+  .wordmark{
+    font-family:var(--mono);
+    font-weight:400;
+    font-size: 0.875rem;
+    letter-spacing:0.02em;
+    color:var(--paper);
+    text-decoration:none;
+    line-height:1;
+    display:inline-flex; align-items:center; gap:0.55rem;
+    text-transform:lowercase;
+  }
+  .wordmark .mark{
+    display:inline-block; width:11px; height:11px;
+    border:1px solid var(--paper-3);
+    position:relative;
+  }
+  .wordmark .mark::before, .wordmark .mark::after{
+    content:""; position:absolute; inset:1px; background:transparent;
+  }
+  .wordmark .mark::before{
+    background: linear-gradient(135deg, transparent calc(50% - 0.5px), var(--teal) calc(50% - 0.5px), var(--teal) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  }
+  .wordmark .mark::after{
+    background: linear-gradient(45deg, transparent calc(50% - 0.5px), var(--teal) calc(50% - 0.5px), var(--teal) calc(50% + 0.5px), transparent calc(50% + 0.5px));
+  }
+  .wordmark .label{ display:inline-flex; align-items:baseline; gap:0; }
+  .wordmark .glyph{ color:var(--teal); margin-left:0.05em; }
+
+  .chrome .center-readout{
+    grid-column:2; justify-self:center;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--paper-3);
+    display:flex; align-items:center; gap:0.9rem;
+  }
+  .chrome .center-readout .dot{
+    width:6px; height:6px; border-radius:50%; background:var(--teal);
+    box-shadow: 0 0 0 0 var(--teal);
+    animation: pulse 2.6s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{ opacity:.55; transform:scale(1); }
+    50%   { opacity:1;   transform:scale(1.15); }
+  }
+  .chrome .meta{
+    grid-column:3; justify-self:end;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.14em; text-transform:uppercase;
+    color:var(--paper-3);
+    display:flex; align-items:center; gap:0.75rem;
+    white-space:nowrap;
+  }
+  .chrome .meta .sep{ color:var(--paper-4); }
+
+  /* ——— left telemetry rail ——— */
+  .rail{
+    position:fixed; top:0; bottom:0; left:0;
+    width:var(--rail-w);
+    z-index:30;
+    pointer-events:none;
+    border-right: 1px solid var(--rule);
+    display:flex; flex-direction:column; justify-content:center; align-items:center;
+    padding: 6rem 0 6rem;
+  }
+  .rail .ticks{
+    display:flex; flex-direction:column; gap: 0;
+    align-items:center;
+  }
+  .rail .tick{
+    --active: 0;
+    pointer-events:auto;
+    cursor:pointer;
+    display:grid; place-items:center;
+    width:var(--rail-w); height: 4.4rem;
+    text-decoration:none;
+    color: var(--paper-4);
+    font-family:var(--mono); font-weight:400;
+    font-size:0.625rem; letter-spacing:0.2em; text-transform:uppercase;
+    position:relative;
+    transition: color .35s ease;
+  }
+  .rail .tick::before{
+    content:""; position:absolute; right:-0.5px; top:50%; transform:translateY(-50%);
+    width:14px; height:1px; background:var(--paper-4);
+    transition: width .45s cubic-bezier(.2,.6,.2,1), background-color .35s ease;
+  }
+  .rail .tick.active{ color: var(--paper); }
+  .rail .tick.active::before{ width:26px; background:var(--teal); }
+  .rail .tick:hover{ color: var(--paper-2); }
+
+  .rail .progress{
+    position:absolute; left:50%; top:1rem; bottom:1rem; width:1px;
+    transform:translateX(-50%);
+    background: var(--rule-2);
+    overflow:hidden;
+  }
+  .rail .progress::after{
+    content:""; position:absolute; left:0; top:0; width:100%;
+    height: var(--p, 0%);
+    background: linear-gradient(to bottom, transparent, var(--teal) 60%, var(--teal));
+    opacity:.85;
+    transition: height .12s linear;
+  }
+  @media (max-width:720px){ .rail{ display:none; } }
+
+  /* ——— right side coordinate marker ——— */
+  .right-rail{
+    position:fixed; top:50%; right:0;
+    transform: translateY(-50%) rotate(90deg);
+    transform-origin: right center;
+    padding: 0.5rem 1rem;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.625rem; letter-spacing:0.32em; text-transform:uppercase;
+    color: var(--paper-4);
+    z-index:30;
+    pointer-events:none;
+  }
+  @media (max-width:900px){ .right-rail{ display:none; } }
+
+  /* ——————————————————————————— sections ——————————————————————————— */
+  main{ display:block; padding-left: var(--rail-w); position:relative; z-index:2; }
+  @media (max-width:720px){ main{ padding-left:0; } }
+
+  section{
+    position:relative;
+    padding: var(--section-y) var(--gutter);
+    border-top: 1px solid transparent;
+  }
+  section + section{ border-top-color: var(--rule); }
+  section[data-tone="mid"]{ background: var(--mid); }
+
+  /* tiny corner index dot at top of each section's hairline */
+  section + section::before{
+    content:""; position:absolute; left:var(--gutter); top:-3px; width:5px; height:5px;
+    background: var(--teal); opacity:.55;
+  }
+
+  .grid{
+    display:grid;
+    grid-template-columns: 11rem 1fr;
+    column-gap: clamp(1.5rem, 4vw, 4rem);
+    max-width: 78rem;
+    margin: 0 auto;
+  }
+  @media (max-width: 760px){
+    .grid{ grid-template-columns: 1fr; row-gap: 1.75rem; }
+  }
+
+  .index-block{
+    align-self:start;
+    padding-top:0.4rem;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.2em; text-transform:uppercase;
+    color:var(--paper-3);
+    line-height:1.7;
+    display:flex; flex-direction:column; gap:0.85rem;
+  }
+  .index-block .num{ color:var(--paper); letter-spacing:0.22em; }
+  .index-block .ref{ color:var(--paper-4); font-size:0.625rem; letter-spacing:0.18em; }
+  .index-block .ref::before{ content:"§ "; color:var(--paper-4); }
+
+  .body{ max-width: var(--measure); }
+  .body p{ margin: 0 0 1.25em 0; text-wrap:pretty; color:var(--paper); }
+  .body p + p{ margin-top: 0.25em; }
+  .body p.lede{
+    font-size: clamp(1.25rem, 0.5vw + 1.15rem, 1.5rem);
+    line-height:1.45;
+    font-weight:300;
+    letter-spacing:-0.005em;
+    color:var(--paper);
+    margin-bottom: 1.6em;
+  }
+
+  .h-eyebrow{
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.22em; text-transform:uppercase;
+    color:var(--paper-3);
+    margin: 0 0 1.6rem 0;
+    display:flex; align-items:center; gap:0.7rem;
+  }
+  .h-eyebrow::before{
+    content:""; display:inline-block; width:14px; height:1px; background:var(--teal);
+  }
+
+  /* ——————————————————————————— 01 hero ——————————————————————————— */
+  #hero{
+    min-height: 100vh; min-height: 100svh;
+    display:grid; grid-template-rows: 1fr auto;
+    padding-top: clamp(8rem, 22vh, 14rem);
+    padding-bottom: clamp(2rem, 6vh, 4rem);
+    border-top:0 !important;
+  }
+  #hero .grid{ align-content:center; }
+  .hero-line{
+    font-family:var(--serif);
+    font-weight:200;
+    font-size: clamp(2.25rem, 4.6vw + 0.5rem, 4.75rem);
+    line-height: 1.08;
+    letter-spacing: -0.022em;
+    color:var(--paper);
+    max-width: 22ch;
+    margin:0;
+    text-wrap:balance;
+    position:relative;
+  }
+  .hero-line .cursor{
+    display:inline-block; width:0.42ch; height:0.92em;
+    background:var(--teal);
+    margin-left:0.12em;
+    vertical-align:-0.08em;
+    animation: blink 1.6s steps(2,end) infinite;
+  }
+  @keyframes blink{ 50%{ opacity:0; } }
+
+  .hero-foot{
+    max-width:78rem; margin:0 auto; width:100%;
+    display:grid; grid-template-columns: 11rem 1fr auto;
+    column-gap: clamp(1.5rem, 4vw, 4rem);
+    align-items:end;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.2em; text-transform:uppercase;
+    color:var(--paper-3);
+  }
+  .hero-foot .lh-label{ color:var(--paper-3); display:block; }
+  .hero-foot .lh-name{ color:var(--paper); display:block; white-space:nowrap; }
+  .hero-foot .scroll-cue{ display:inline-flex; align-items:center; gap:0.6rem; }
+  .hero-foot .scroll-cue::after{
+    content:""; display:inline-block; width:1px; height:2.25rem;
+    background:linear-gradient(to bottom, var(--paper-3), transparent);
+    animation: drift 3.6s ease-in-out infinite;
+    transform-origin: top center;
+  }
+  @keyframes drift{
+    0%,100%{ transform: scaleY(0.6); opacity:0.45; }
+    50%   { transform: scaleY(1);   opacity:1; }
+  }
+  @media (max-width:760px){
+    .hero-foot{ grid-template-columns: 1fr 1fr; row-gap:1rem; }
+  }
+
+  /* ——————————————————————————— 04 credentials ——————————————————————————— */
+  .credentials{
+    list-style:none; padding:0; margin:0;
+    display:grid; gap:0;
+  }
+  .credentials li{
+    display:grid;
+    grid-template-columns: 4rem 9rem 1fr auto;
+    align-items:baseline;
+    gap: 1.25rem;
+    padding: 1.05rem 0;
+    border-bottom: 1px solid var(--rule);
+    font-family:var(--mono);
+    font-weight:400;
+    font-size: 0.8125rem;
+    letter-spacing: 0.06em;
+    color: var(--paper);
+    text-transform:uppercase;
+  }
+  .credentials li:first-child{ border-top: 1px solid var(--rule); }
+  .credentials .ref{ color: var(--paper-4); letter-spacing:0.18em; font-size:0.6875rem; }
+  .credentials .key{ color: var(--paper-3); letter-spacing:0.18em; }
+  .credentials .val{ color: var(--paper); }
+  .credentials .num{ color: var(--paper-3); font-feature-settings:"tnum","lnum"; text-align:right; }
+  @media (max-width: 720px){
+    .credentials li{ grid-template-columns: auto 1fr; row-gap:0.2rem; column-gap:0.9rem; padding:0.85rem 0; }
+    .credentials .val{ grid-column: 1 / -1; }
+    .credentials .num{ grid-column: 1 / -1; text-align:left; }
+  }
+
+  /* ——————————————————————————— 05 closing ——————————————————————————— */
+  .mailto{
+    font-family:var(--serif);
+    font-weight:300;
+    font-size: clamp(1.75rem, 2.4vw + 0.9rem, 2.875rem);
+    line-height:1.1;
+    letter-spacing:-0.018em;
+    color: var(--paper);
+    text-decoration:none;
+    display:inline-flex; align-items:baseline; gap:0.5rem;
+    position:relative;
+    padding-bottom: 0.18em;
+    margin-top: 1.5rem;
+  }
+  .mailto::after{
+    content:""; position:absolute; left:0; right:0; bottom:0;
+    height:1px; background: var(--paper-3);
+    transition: background-color .5s ease;
+  }
+  .mailto:hover::after{ background:var(--teal); }
+  .mailto .arrow{
+    font-family:var(--mono); font-size:0.55em; color:var(--teal);
+    transform:translateY(-0.2em);
+    transition: transform .35s cubic-bezier(.2,.6,.2,1);
+  }
+  .mailto:hover .arrow{ transform:translateY(-0.2em) translateX(0.25em); }
+
+  .closing-note{
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.22em; text-transform:uppercase;
+    color:var(--paper-3);
+    margin-top: 4.5rem;
+    display:grid; grid-template-columns: auto 1fr; gap:0.75rem 1.25rem;
+    max-width:34rem;
+  }
+  .closing-note dt{ color:var(--paper-4); letter-spacing:0.2em; }
+  .closing-note dd{ margin:0; color:var(--paper-2); }
+
+  /* ————————————————————————— 06 dispatches — glassmorphic card ————————————————————————— */
+  .subscribe{
+    margin-top: 0.5rem;
+    max-width: 28rem;
+    display:block;
+    position:relative;
+    background: rgba(245,245,245,0.03);
+    padding: 1.5rem;
+    border-radius: 14px;
+    border: 1px solid rgba(245,245,245,0.08);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    transition: border-color .35s ease, background-color .35s ease, transform .35s cubic-bezier(.2,.6,.2,1);
+  }
+  .subscribe:focus-within{
+    border-color: rgba(88,149,157,0.45);
+    background: rgba(245,245,245,0.05);
+    transform: translateY(-3px);
+  }
+  .subscribe .heading{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--paper-3);
+    margin-bottom: 1rem;
+    display: flex; align-items: center; gap: 0.6rem;
+  }
+  .subscribe .heading::before{
+    content:""; display:inline-block; width:14px; height:1px; background: var(--teal);
+  }
+  .subscribe .input-group{ position:relative; margin-bottom: 0.75rem; }
+  .subscribe .input-icon{
+    position:absolute; left: 14px; top: 50%;
+    transform: translateY(-50%);
+    width: 18px; height: 18px;
+    color: var(--paper-3);
+    transition: color .25s ease;
+    pointer-events:none;
+  }
+  .subscribe:focus-within .input-icon{ color: var(--teal); }
+  .subscribe.is-ok .input-icon{ color: var(--teal); }
+  .subscribe.is-err .input-icon{ color: #ff8787; }
+
+  .subscribe input[type="email"]{
+    appearance:none; -webkit-appearance:none;
+    width: 100%;
+    padding: 0.95rem 1rem 0.95rem 2.6rem;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(245,245,245,0.1);
+    border-radius: 8px;
+    color: var(--paper);
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.875rem; letter-spacing: 0.01em;
+    outline:none;
+    transition: border-color .2s ease, background-color .2s ease;
+  }
+  .subscribe input::placeholder{ color: var(--paper-4); font-style: normal; }
+  .subscribe input:focus{ border-color: var(--teal); }
+
+  .subscribe button{
+    appearance:none; cursor:pointer;
+    width: 100%;
+    padding: 0.95rem 1rem;
+    background: var(--teal);
+    border: 0; border-radius: 8px;
+    color: #0c161e;
+    font-family: var(--mono); font-weight: 500;
+    font-size: 0.75rem; letter-spacing: 0.18em; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+    transition: background-color .2s ease, transform .2s ease, box-shadow .25s ease;
+  }
+  .subscribe button:hover:not(:disabled){
+    background: #6ab0b9;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px -8px rgba(88,149,157,0.55);
+  }
+  .subscribe button[disabled]{ opacity:.5; cursor: default; transform:none; box-shadow:none; }
+  .subscribe button svg{ width: 14px; height: 14px; }
+
+  .subscribe .meta-row{
+    margin-top: 0.9rem;
+    display:flex; justify-content:center; align-items:baseline;
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .subscribe .meta-row .status{
+    color: var(--paper-4);
+    transition: color .3s ease;
+  }
+  .subscribe.is-ok .meta-row .status{ color: var(--teal); }
+  .subscribe.is-err .meta-row .status{ color: #ff8787; }
+
+  /* ————————————————————————— 07 enquiry — same card vocabulary, multi-field ————————————————————————— */
+  .enquiry{
+    margin-top: 0.5rem;
+    max-width: 36rem;
+    position: relative;
+    background: rgba(245,245,245,0.03);
+    padding: 1.75rem;
+    border-radius: 14px;
+    border: 1px solid rgba(245,245,245,0.08);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+    transition: border-color .35s ease, background-color .35s ease, transform .35s cubic-bezier(.2,.6,.2,1);
+  }
+  .enquiry:focus-within{
+    border-color: rgba(88,149,157,0.45);
+    background: rgba(245,245,245,0.05);
+    transform: translateY(-2px);
+  }
+  .enquiry .field-row{
+    display: grid;
+    column-gap: 0.85rem;
+    row-gap: 0.85rem;
+  }
+  .enquiry .field-row.two{ grid-template-columns: 1fr 1fr; }
+  @media (max-width: 640px){
+    .enquiry{ padding: 1.25rem; }
+    .enquiry .field-row.two{ grid-template-columns: 1fr; }
+  }
+  .enquiry .field{
+    display: block;
+    margin-bottom: 0.85rem;
+  }
+  .enquiry .field-row .field{ margin-bottom: 0; }
+  .enquiry .lbl{
+    display: block;
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.5625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-3);
+    margin-bottom: 0.4rem;
+  }
+  .enquiry input,
+  .enquiry textarea{
+    appearance: none; -webkit-appearance: none;
+    width: 100%;
+    background: rgba(0,0,0,0.2);
+    border: 1px solid rgba(245,245,245,0.1);
+    border-radius: 8px;
+    padding: 0.75rem 0.85rem;
+    color: var(--paper);
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.875rem;
+    letter-spacing: 0.01em;
+    outline: none;
+    transition: border-color .2s ease, background-color .2s ease;
+  }
+  .enquiry textarea{
+    resize: vertical;
+    min-height: 5.5rem;
+    font-family: var(--serif);
+    font-weight: 300;
+    font-size: 1rem;
+    line-height: 1.5;
+  }
+  .enquiry input::placeholder{ color: var(--paper-4); }
+  .enquiry input:focus,
+  .enquiry textarea:focus{ border-color: var(--teal); }
+  .enquiry .field.has-error input,
+  .enquiry .field.has-error textarea{ border-color: #ff8787; }
+
+  .enquiry button{
+    appearance: none; cursor: pointer;
+    width: 100%;
+    margin-top: 0.4rem;
+    padding: 0.95rem 1rem;
+    background: var(--teal);
+    border: 0; border-radius: 8px;
+    color: #0c161e;
+    font-family: var(--mono); font-weight: 500;
+    font-size: 0.75rem; letter-spacing: 0.18em; text-transform: uppercase;
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+    transition: background-color .2s ease, transform .2s ease, box-shadow .25s ease;
+  }
+  .enquiry button:hover:not(:disabled){
+    background: #6ab0b9;
+    transform: translateY(-1px);
+    box-shadow: 0 8px 22px -8px rgba(88,149,157,0.55);
+  }
+  .enquiry button[disabled]{ opacity: .5; cursor: default; transform: none; box-shadow: none; }
+  .enquiry button svg{ width: 14px; height: 14px; }
+
+  .enquiry .meta-row{
+    margin-top: 0.9rem;
+    display: flex; justify-content: center; align-items: baseline;
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-4);
+  }
+  .enquiry .meta-row .status{ transition: color .3s ease; }
+  .enquiry.is-ok .meta-row .status{ color: var(--teal); }
+  .enquiry.is-err .meta-row .status{ color: #ff8787; }
+
+  .dispatch-eyebrow{
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.6875rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-3);
+    margin: 0 0 1.6rem 0;
+  }
+
+  /* ——————————————————————————— footer ——————————————————————————— */
+  footer.foot{
+    padding: 2.25rem var(--gutter) 2.25rem;
+    margin-left: var(--rail-w);
+    border-top: 1px solid var(--rule);
+    display:grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items:center;
+    gap:1rem;
+    font-family:var(--mono); font-weight:400;
+    font-size:0.6875rem; letter-spacing:0.18em; text-transform:uppercase;
+    color:var(--paper-3);
+  }
+  footer.foot .legal{ justify-self:start; }
+  footer.foot .domain{ justify-self:center; }
+  footer.foot .place{ justify-self:end; }
+  footer.foot .foot-link{
+    color: var(--paper-2);
+    text-decoration: none;
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 1px;
+    transition: color .25s ease, border-color .25s ease;
+  }
+  footer.foot .foot-link:hover{ color: var(--paper); border-bottom-color: var(--teal); }
+  @media (max-width:720px){
+    footer.foot{ margin-left:0; grid-template-columns:1fr; justify-items:start; gap:0.5rem; }
+    footer.foot > *{ justify-self:start !important; }
+  }
+
+  /* ——————————————————————————— mobile safety ——————————————————————————— */
+  @media (max-width: 720px){
+    :root{ --section-y: clamp(5rem, 14vh, 8rem); }
+    #hero{ padding-top: clamp(7rem, 18vh, 10rem); }
+    .hero-line{ font-size: clamp(2rem, 9vw, 2.75rem) !important; }
+    .body p.lede{ font-size: 1.125rem; }
+    html, body{ overflow-y: auto; height: auto; min-height: 100%; -webkit-overflow-scrolling: touch; }
+  }
+
+  /* (legacy hairline-row adornment block — superseded by card style above) */
+
+  /* ——————————————————————————— WhatsApp floating action ——————————————————————————— */
+  .wa-fab{
+    position: fixed;
+    right: clamp(1rem, 2.4vw, 1.75rem);
+    bottom: clamp(1rem, 2.4vw, 1.75rem);
+    z-index: 60;
+    width: 56px; height: 56px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--navy);
+    color: var(--teal);
+    border: 1px solid var(--teal);
+    box-shadow:
+      0 12px 28px -10px rgba(0,0,0,0.55),
+      inset 0 0 0 1px rgba(245,245,245,0.04);
+    text-decoration: none;
+    transition: transform .35s cubic-bezier(.2,.6,.2,1), color .25s ease, background-color .25s ease;
+    opacity: 0;
+    transform: translateY(8px) scale(.94);
+  }
+  body.loaded .wa-fab{ opacity: 1; transform: none; transition-delay: .8s; }
+  .wa-fab::before{
+    content:""; position:absolute; inset:-6px; border-radius:50%;
+    border: 1px solid var(--teal);
+    opacity:0;
+    animation: wa-halo 3.2s ease-out infinite;
+    pointer-events:none;
+  }
+  @keyframes wa-halo{
+    0%   { transform: scale(.85); opacity: 0; }
+    30%  { opacity: .35; }
+    100% { transform: scale(1.35); opacity: 0; }
+  }
+  .wa-fab:hover{
+    background: var(--teal);
+    color: var(--navy);
+    transform: translateY(-2px);
+  }
+  .wa-fab:hover::before{ animation: none; opacity: 0; }
+  .wa-fab svg{ width: 24px; height: 24px; display:block; }
+  .wa-fab .wa-label{
+    position: absolute;
+    right: calc(100% + 0.75rem);
+    top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-weight: 400;
+    font-size: 0.625rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--paper-2);
+    background: var(--navy);
+    border: 1px solid var(--rule);
+    padding: 0.5rem 0.75rem;
+    white-space: nowrap;
+    opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+  }
+  .wa-fab:hover .wa-label{ opacity:1; transform: translateY(-50%) translateX(-2px); }
+  @media (max-width: 720px){
+    .wa-fab{ width: 52px; height: 52px; }
+    .wa-fab .wa-label{ display:none; }
+  }
+  @media (prefers-reduced-motion: reduce){
+    .wa-fab::before{ animation: none; }
+  }
+
+  /* ——————————————————————————— reveal ——————————————————————————— */
+  .reveal{
+    opacity:0; transform: translateY(8px);
+    transition: opacity 1.4s cubic-bezier(.2,.6,.2,1), transform 1.4s cubic-bezier(.2,.6,.2,1);
+    transition-delay: var(--rd, 0ms);
+    will-change: opacity, transform;
+  }
+  .reveal.in{ opacity:1; transform:none; }
+  @media (prefers-reduced-motion: reduce){
+    .reveal,.hero-line .cursor,.hero-foot .scroll-cue::after,.chrome .center-readout .dot{ animation:none !important; transition:none !important; opacity:1; transform:none; }
+  }
+</style>
+</head>
+<body>
+
+<span class="frame-tick tl" aria-hidden="true"></span>
+<span class="frame-tick tr" aria-hidden="true"></span>
+<span class="frame-tick bl" aria-hidden="true"></span>
+<span class="frame-tick br" aria-hidden="true"></span>
+
+<header class="chrome" role="banner">
+  <a class="wordmark" href="#hero" aria-label="Kuronyx — home">
+    <span class="label"><span>kurony</span><span class="glyph">✗</span></span>
+  </a>
+  <span class="center-readout" id="centerReadout" aria-hidden="true">
+    <span class="dot"></span>
+    <span id="centerLabel">SYS · IDLE</span>
+  </span>
+  <span class="meta">
+    <span id="clock">—</span>
+    <span class="sep">·</span>
+    <span style="white-space:nowrap;">IST · 19.127733°N 72.834761°E</span>
+  </span>
+</header>
+
+<nav class="rail" aria-label="Section navigation">
+  <span class="progress" aria-hidden="true" id="railProgress"></span>
+  <div class="ticks">
+    <a class="tick" href="#hero" data-id="01">01</a>
+    <a class="tick" href="#what" data-id="02">02</a>
+    <a class="tick" href="#why" data-id="03">03</a>
+    <a class="tick" href="#credentials" data-id="04">04</a>
+    <a class="tick" href="#vets" data-id="05">05</a>
+    <a class="tick" href="#dispatches" data-id="06">06</a>
+    <a class="tick" href="#enquiry" data-id="07">07</a>
+  </div>
+</nav>
+
+<aside class="right-rail" aria-hidden="true">Kuronyx Sciences · Rev. 2025·09 · Mumbai</aside>
+
+<main>
+
+  <!-- 01 -->
+  <section id="hero" data-screen-label="01 Hero" data-id="01" data-name="Hero">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">01</span>
+        <span class="ref">Hero · Field 0</span>
+      </div>
+      <h1 class="hero-line reveal" style="--rd:120ms">
+        The dark matter of Indian veterinary medicine.<span class="cursor" aria-hidden="true"></span>
+      </h1>
+    </div>
+    <div class="hero-foot">
+      <span class="reveal" style="--rd:600ms">
+        <span class="lh-label">Operator</span>
+        <span class="lh-name">Kuronyx Speciality Pharmacy</span>
+      </span>
+      <span></span>
+      <span class="scroll-cue reveal" style="--rd:800ms">Continue</span>
+    </div>
+  </section>
+
+  <!-- 02 -->
+  <section id="what" data-screen-label="02 What We Are" data-id="02" data-name="What we are">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">02</span>
+        <span class="ref">What we are</span>
+      </div>
+      <div class="body">
+        <p class="lede reveal" style="--rd:80ms">
+          Some gaps are so familiar they stop looking like gaps.
+        </p>
+        <p class="reveal" style="--rd:240ms">
+          Kuronyx Speciality Pharmacy exists in that space — India's first
+          veterinary-only compounding and import pharmacy, prescription-only,
+          built for the vets and the animals that clinical infrastructure forgot.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 03 -->
+  <section id="why" data-tone="mid" data-screen-label="03 Why This Matters" data-id="03" data-name="Why this matters">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">03</span>
+        <span class="ref">Why this matters</span>
+      </div>
+      <div class="body">
+        <p class="lede reveal" style="--rd:80ms">
+          In India, a cat can be diagnosed with a treatable disease and still die
+          — not because medicine doesn't exist, but because the right medicine,
+          at the right concentration, for the right species, does not exist here
+          in any regulated form.
+        </p>
+        <p class="reveal" style="--rd:280ms">
+          Veterinarians know this. They work around it every day. Kuronyx was
+          built so they don't have to.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 04 -->
+  <section id="credentials" data-screen-label="04 Credentials" data-id="04" data-name="Credentials">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">04</span>
+        <span class="ref">On record</span>
+      </div>
+      <div class="body" style="max-width:48rem;">
+        <p class="h-eyebrow reveal">Filed credentials &nbsp;·&nbsp; Govt. of India</p>
+        <ul class="credentials">
+          <li class="reveal" style="--rd:60ms">
+            <span class="ref">001</span>
+            <span class="key">Quality</span>
+            <span class="val">ISO 9001:2015 certified</span>
+            <span class="num">2025</span>
+          </li>
+          <li class="reveal" style="--rd:140ms">
+            <span class="ref">002</span>
+            <span class="key">Recognition</span>
+            <span class="val">DPIIT — Healthcare &amp; Life Sciences</span>
+            <span class="num">DPIIT/IND</span>
+          </li>
+          <li class="reveal" style="--rd:220ms">
+            <span class="ref">003</span>
+            <span class="key">Registration</span>
+            <span class="val">MSME registered</span>
+            <span class="num">Udyam</span>
+          </li>
+          <li class="reveal" style="--rd:300ms">
+            <span class="ref">004</span>
+            <span class="key">Trade</span>
+            <span class="val">IEC active</span>
+            <span class="num">DGFT</span>
+          </li>
+          <li class="reveal" style="--rd:380ms">
+            <span class="ref">005</span>
+            <span class="key">Incorporation</span>
+            <span class="val">Kuronyx Sciences Private Limited</span>
+            <span class="num">Sep 2025 · Mumbai</span>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 -->
+  <section id="vets" data-screen-label="05 For Veterinarians" data-id="05" data-name="For veterinarians">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">05</span>
+        <span class="ref">For veterinarians</span>
+      </div>
+      <div class="body" style="max-width:42rem;">
+        <p class="lede reveal" style="--rd:60ms">
+          Kuronyx Speciality Pharmacy is a prescription-only dispensary.
+          We do not sell to the public.
+        </p>
+        <p class="reveal" style="--rd:220ms">
+          Every compounded formulation is dispensed against a valid veterinary
+          prescription, courier-dispatched nationwide.
+        </p>
+        <p class="reveal" style="--rd:380ms">
+          If you are a veterinarian and you have a patient who needs what we make
+          — write to us.
+        </p>
+
+        <a class="mailto reveal" style="--rd:560ms"
+           href="mailto:hello@kuronyx.in">
+          hello@kuronyx.in<span class="arrow" aria-hidden="true">→</span>
+        </a>
+
+        <dl class="closing-note reveal" style="--rd:780ms">
+          <dt>Channel</dt><dd>Direct · prescription required</dd>
+          <dt>Latency</dt><dd>Reply within one working day</dd>
+          <dt>Origin</dt><dd>Mumbai · 19.127733°N 72.834761°E</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <!-- 06 -->
+  <section id="dispatches" data-screen-label="06 Dispatches" data-id="06" data-name="Dispatches">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">06</span>
+        <span class="ref">Dispatches</span>
+      </div>
+      <div class="body" style="max-width:42rem;">
+        <p class="dispatch-eyebrow reveal">Field notes</p>
+        <p class="lede reveal" style="--rd:80ms">
+          Occasional dispatches from the formulary — new compounds, regulatory
+          notes, case reports from the field.
+        </p>
+        <p class="reveal" style="--rd:240ms">
+          No marketing. Unsubscribe in one click.
+        </p>
+
+        <form class="subscribe reveal" style="--rd:400ms" id="subscribeForm"
+              name="newsletter"
+              method="POST"
+              data-netlify="true"
+              netlify-honeypot="bot-field"
+              novalidate>
+          <input type="hidden" name="form-name" value="newsletter" />
+          <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
+          <div class="heading">Field dispatches · subscribe</div>
+          <div class="input-group">
+            <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="1"/>
+              <path d="M3.5 6 L12 13 L20.5 6"/>
+            </svg>
+            <input
+              type="email"
+              name="email"
+              id="subscribeEmail"
+              placeholder="your.name@clinic.in"
+              autocomplete="email"
+              spellcheck="false"
+              aria-label="Email address"
+              required
+            />
+          </div>
+          <button type="submit" id="subscribeBtn">
+            <span class="label">Subscribe</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12 H19"/><path d="M13 6 L19 12 L13 18"/>
+            </svg>
+          </button>
+          <div class="meta-row">
+            <span class="status" id="subscribeStatus">Awaiting input</span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- 07 -->
+  <section id="enquiry" data-screen-label="07 Write to us" data-id="07" data-name="Write to us">
+    <div class="grid">
+      <div class="index-block reveal">
+        <span class="num">07</span>
+        <span class="ref">Write to us</span>
+      </div>
+      <div class="body" style="max-width:42rem;">
+        <p class="dispatch-eyebrow reveal">Enquiry</p>
+        <p class="lede reveal" style="--rd:80ms">
+          For veterinarians with a patient query or a prescription enquiry.
+        </p>
+
+        <form class="enquiry reveal" style="--rd:240ms" id="enquiryForm"
+              name="enquiry"
+              method="POST"
+              data-netlify="true"
+              netlify-honeypot="bot-field"
+              novalidate>
+          <input type="hidden" name="form-name" value="enquiry" />
+          <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
+
+          <div class="field-row two">
+            <label class="field">
+              <span class="lbl">Name</span>
+              <input type="text" name="name" id="enq-name" required autocomplete="name" />
+            </label>
+            <label class="field">
+              <span class="lbl">Clinic / Hospital</span>
+              <input type="text" name="clinic" id="enq-clinic" required autocomplete="organization" />
+            </label>
+          </div>
+
+          <div class="field-row two">
+            <label class="field">
+              <span class="lbl">City</span>
+              <input type="text" name="city" id="enq-city" required autocomplete="address-level2" />
+            </label>
+            <label class="field">
+              <span class="lbl">Email</span>
+              <input type="email" name="email" id="enq-email" required autocomplete="email"
+                     placeholder="your.name@clinic.in" spellcheck="false" />
+            </label>
+          </div>
+
+          <label class="field">
+            <span class="lbl">Phone number</span>
+            <input type="tel" name="phone" id="enq-phone" required autocomplete="tel" inputmode="tel" />
+          </label>
+
+          <label class="field">
+            <span class="lbl">Message</span>
+            <textarea name="message" id="enq-message" rows="4" required></textarea>
+          </label>
+
+          <button type="submit" id="enquiryBtn">
+            <span class="label">Write to us</span>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M5 12 H19"/><path d="M13 6 L19 12 L13 18"/>
+            </svg>
+          </button>
+          <div class="meta-row">
+            <span class="status" id="enquiryStatus">Awaiting input</span>
+          </div>
+        </form>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <span class="legal">© 2026 Kuronyx Sciences Pvt. Ltd.</span>
+  <span class="domain"><a href="./Privacy%20Policy.html" class="foot-link">Privacy Policy</a> · kuronyx.in</span>
+  <span class="place">Mumbai · India · IST</span>
+</footer>
+
+<!-- WhatsApp Business floating action -->
+<a class="wa-fab"
+   href="https://wa.me/917083515424"
+   target="_blank"
+   rel="noopener noreferrer"
+   aria-label="Chat on WhatsApp Business">
+  <span class="wa-label">WhatsApp Business</span>
+  <svg viewBox="0 0 32 32" fill="currentColor" aria-hidden="true">
+    <path d="M16.04 4C9.4 4 4 9.39 4 16.02c0 2.12.55 4.18 1.6 6L4 28l6.16-1.61a12.04 12.04 0 0 0 5.88 1.5h.01c6.64 0 12.03-5.4 12.03-12.02 0-3.21-1.25-6.23-3.52-8.5A12 12 0 0 0 16.04 4Zm0 2.16a9.87 9.87 0 0 1 7.01 2.9 9.84 9.84 0 0 1 2.9 7.01c0 5.45-4.44 9.86-9.91 9.86a9.93 9.93 0 0 1-5.05-1.38l-.36-.22-3.66.96.97-3.56-.24-.37a9.78 9.78 0 0 1-1.5-5.24c0-5.45 4.44-9.86 9.84-9.86Zm-3.46 5.3c-.17 0-.45.06-.69.32-.23.25-.9.88-.9 2.14 0 1.27.92 2.49 1.05 2.66.13.17 1.81 2.88 4.49 3.92 2.22.87 2.67.7 3.16.65.48-.04 1.57-.64 1.79-1.26.22-.62.22-1.16.16-1.26-.06-.1-.23-.17-.49-.3-.26-.13-1.56-.77-1.8-.86-.24-.09-.42-.13-.59.13-.17.26-.68.86-.84 1.03-.15.17-.31.2-.57.07-.26-.13-1.11-.41-2.12-1.31-.78-.7-1.31-1.56-1.46-1.83-.15-.26-.02-.4.11-.53.12-.12.26-.31.39-.46.13-.15.17-.26.26-.43.09-.17.04-.32-.02-.46-.07-.13-.59-1.42-.8-1.94-.21-.51-.43-.44-.59-.45-.15 0-.32-.01-.5-.01Z"/>
+  </svg>
+</a>
+
+<script>
+  // ——— mark loaded so the hairline draws in
+  requestAnimationFrame(() => document.body.classList.add('loaded'));
+
+  // ——— clock (IST)
+  const clockEl = document.getElementById('clock');
+  const fmt = new Intl.DateTimeFormat('en-GB', {
+    hour:'2-digit', minute:'2-digit', second:'2-digit',
+    hour12:false, timeZone:'Asia/Kolkata'
+  });
+  const tick = () => { if (clockEl) clockEl.textContent = fmt.format(new Date()) + ' IST'; };
+  tick(); setInterval(tick, 1000);
+
+  // ——— reveal on scroll
+  const reveal = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting){
+        e.target.classList.add('in');
+        reveal.unobserve(e.target);
+      }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+  document.querySelectorAll('.reveal').forEach(el => reveal.observe(el));
+
+  // ——— current section + rail tick highlight
+  const sections = [...document.querySelectorAll('section[data-id]')];
+  const ticks = [...document.querySelectorAll('.rail .tick')];
+  const centerLabel = document.getElementById('centerLabel');
+
+  const setActive = (id, name) => {
+    ticks.forEach(t => t.classList.toggle('active', t.dataset.id === id));
+    if (centerLabel) centerLabel.textContent = `§ ${id} / 07 · ${name.toUpperCase()}`;
+  };
+
+  const tracker = new IntersectionObserver((entries) => {
+    let best = null;
+    entries.forEach(e => {
+      if (e.isIntersecting && (!best || e.intersectionRatio > best.intersectionRatio)) best = e;
+    });
+    if (best) setActive(best.target.dataset.id, best.target.dataset.name);
+  }, { threshold: [0.2, 0.4, 0.6, 0.8] });
+  sections.forEach(s => tracker.observe(s));
+
+  // ——— rail progress meter
+  const progress = document.getElementById('railProgress');
+  const onScroll = () => {
+    const max = document.documentElement.scrollHeight - window.innerHeight;
+    const p = max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+    if (progress) progress.style.setProperty('--p', (p * 100).toFixed(2) + '%');
+  };
+  window.addEventListener('scroll', onScroll, { passive:true });
+  window.addEventListener('resize', onScroll);
+  onScroll();
+
+  // ——— enquiry form (Netlify submit + UI feedback)
+  const enqForm   = document.getElementById('enquiryForm');
+  const enqBtn    = document.getElementById('enquiryBtn');
+  const enqStatus = document.getElementById('enquiryStatus');
+
+  if (enqForm){
+    const allFields = enqForm.querySelectorAll('input, textarea');
+    allFields.forEach(f => {
+      if (f.name === 'bot-field' || f.name === 'form-name') return;
+      f.addEventListener('input', () => {
+        enqForm.classList.remove('is-err','is-ok');
+        f.closest('.field')?.classList.remove('has-error');
+        enqStatus.textContent = 'Ready to send';
+      });
+    });
+
+    enqForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      enqForm.classList.remove('is-err','is-ok');
+      enqForm.querySelectorAll('.field').forEach(f => f.classList.remove('has-error'));
+
+      // simple validation
+      let firstInvalid = null;
+      ['name','clinic','city','email','phone','message'].forEach(n => {
+        const f = enqForm.querySelector('[name="'+n+'"]');
+        if (!f) return;
+        const v = (f.value || '').trim();
+        let bad = !v;
+        if (!bad && n === 'email') bad = !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+        if (bad){
+          f.closest('.field')?.classList.add('has-error');
+          if (!firstInvalid) firstInvalid = f;
+        }
+      });
+      if (firstInvalid){
+        enqForm.classList.add('is-err');
+        enqStatus.textContent = 'Please complete required fields';
+        firstInvalid.focus();
+        return;
+      }
+
+      enqBtn.disabled = true;
+      enqStatus.textContent = 'Transmitting…';
+      try {
+        const formData = new FormData(enqForm);
+        const payload = {};
+        formData.forEach((v, k) => {
+          if (k !== 'bot-field' && k !== 'form-name') {
+            payload[k] = v;
+          }
+        });
+        
+        // Background backup submission to Netlify
+        try {
+          const body = new URLSearchParams();
+          formData.forEach((v, k) => body.append(k, v));
+          fetch('/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+          });
+        } catch (e) {}
+
+        const res = await fetch('/php/send-enquiry.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        
+        const resData = await res.json();
+        if (!res.ok || !resData.success) throw new Error(resData.message || 'Transmission failed');
+
+        enqForm.classList.add('is-ok');
+        enqBtn.querySelector('.label').textContent = 'Sent';
+        enqStatus.textContent = 'Received · we will reply within one working day';
+        allFields.forEach(f => f.setAttribute('readonly','readonly'));
+      } catch (err) {
+        enqForm.classList.add('is-err');
+        enqStatus.textContent = err.message || 'Connection error. Try again.';
+        enqBtn.disabled = false;
+      }
+    });
+  }
+</script>
+<script src="js/subscribe.js"></script>
+</body>
+</html>
