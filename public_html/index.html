@@ -157,8 +157,15 @@
   }
   header.chrome > *{ pointer-events:auto; }
   header.chrome::after{
-    content:""; position:absolute; left:var(--gutter); right:var(--gutter); bottom:0;
-    height:1px; background:var(--rule);
+    content:"";
+    position:absolute;
+    left:var(--gutter);
+    right:var(--gutter);
+
+    bottom:0.5px;
+
+    height:1px;
+    background:var(--rule);
     transform:scaleX(0); transform-origin:left center;
     transition: transform 1.4s cubic-bezier(.2,.6,.2,1) .2s;
   }
@@ -175,6 +182,12 @@
     display:inline-flex; align-items:center; gap:0.55rem;
     text-transform:lowercase;
   }
+  .logo {
+    height: 18px;
+    width: auto;
+    display: block;
+    object-fit: contain;
+}
   .wordmark .mark{
     display:inline-block; width:11px; height:11px;
     border:1px solid var(--paper-3);
@@ -797,8 +810,8 @@
 
 <header class="chrome" role="banner">
   <a class="wordmark" href="#hero" aria-label="Kuronyx — home">
-    <span class="label"><span>kurony</span><span class="glyph">✗</span></span>
-  </a>
+    <img src="assets/logoNoBG.png" alt="Kuronyx Logo" class="logo">
+</a>
   <span class="center-readout" id="centerReadout" aria-hidden="true">
     <span class="dot"></span>
     <span id="centerLabel">SYS · IDLE</span>
