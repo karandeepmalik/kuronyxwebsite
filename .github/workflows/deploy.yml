@@ -21,7 +21,7 @@ jobs:
           password: ${{ secrets.FTP_PASSWORD }}
           protocol: ftps
           local-dir: ./public_html/
-          server-dir: /public_html/
+          server-dir: /domains/kuronyx.in/public_html/
           exclude: |
             **/.git*
             **/.git*/**
