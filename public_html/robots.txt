@@ -1,4 +1,8 @@
 User-agent: *
 Allow: /
+Disallow: /admin/
+Disallow: /includes/
+Disallow: /gs-441524/veterinarian/apply
+Disallow: /gs-441524/request-received
 
 Sitemap: https://kuronyx.in/sitemap.xml

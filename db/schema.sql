@@ -1,0 +1,188 @@
+-- GS-441524 platform — Phase 1 schema
+-- Run once against the dedicated database created in hPanel (Databases → Management).
+-- No secrets live here; credentials go in public_html/includes/db-config.php (gitignored).
+
+CREATE TABLE staff_users (
+    id            INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name          VARCHAR(150) NOT NULL,
+    email         VARCHAR(190) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    role          ENUM('admin','pharmacy_staff') NOT NULL DEFAULT 'pharmacy_staff',
+    created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE login_attempts (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    identifier  VARCHAR(190) NOT NULL,
+    succeeded   TINYINT(1) NOT NULL DEFAULT 0,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_identifier_time (identifier, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE vet_applications (
+    id                    INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    full_name             VARCHAR(150) NOT NULL,
+    professional_email    VARCHAR(190) NOT NULL,
+    mobile                VARCHAR(30) NOT NULL,
+    registration_number   VARCHAR(100) NOT NULL,
+    registration_state    VARCHAR(100) NOT NULL,
+    registration_country  VARCHAR(100) NOT NULL DEFAULT 'India',
+    qualification         VARCHAR(150) NOT NULL,
+    year_qualified        SMALLINT UNSIGNED NOT NULL,
+    practice_type         VARCHAR(100) NOT NULL,
+    clinic_name           VARCHAR(190) NOT NULL,
+    clinic_address        VARCHAR(255) NOT NULL,
+    clinic_city           VARCHAR(100) NOT NULL,
+    clinic_state          VARCHAR(100) NOT NULL,
+    clinic_pin            VARCHAR(20)  NOT NULL,
+    clinic_country        VARCHAR(100) NOT NULL DEFAULT 'India',
+    clinic_phone          VARCHAR(30)  NOT NULL,
+    clinic_email          VARCHAR(190) NULL,
+    clinic_website        VARCHAR(255) NULL,
+    status                ENUM('pending','under_review','approved','rejected','suspended') NOT NULL DEFAULT 'pending',
+    internal_notes        TEXT NULL,
+    reviewed_by           INT UNSIGNED NULL,
+    reviewed_at           DATETIME NULL,
+    created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vetapp_reviewer FOREIGN KEY (reviewed_by) REFERENCES staff_users(id),
+    INDEX idx_vetapp_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE vet_application_documents (
+    id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    application_id     INT UNSIGNED NOT NULL,
+    stored_filename    VARCHAR(64) NOT NULL,
+    original_filename  VARCHAR(255) NOT NULL,
+    mime_type          VARCHAR(100) NOT NULL,
+    size_bytes         INT UNSIGNED NOT NULL,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vetappdoc_app FOREIGN KEY (application_id) REFERENCES vet_applications(id) ON DELETE CASCADE,
+    INDEX idx_vetappdoc_app (application_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE gs_requests (
+    id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    source                   ENUM('veterinarian','cat_owner') NOT NULL,
+    owner_full_name          VARCHAR(150) NOT NULL,
+    owner_email              VARCHAR(190) NOT NULL,
+    owner_phone              VARCHAR(30)  NOT NULL,
+    owner_address            VARCHAR(255) NOT NULL,
+    owner_city               VARCHAR(100) NOT NULL,
+    owner_state              VARCHAR(100) NOT NULL,
+    owner_pin                VARCHAR(20)  NOT NULL,
+    owner_country            VARCHAR(100) NOT NULL DEFAULT 'India',
+    patient_name             VARCHAR(100) NOT NULL,
+    patient_species          VARCHAR(50)  NOT NULL DEFAULT 'Cat',
+    patient_breed            VARCHAR(100) NULL,
+    patient_sex              ENUM('male','female','unknown') NOT NULL DEFAULT 'unknown',
+    patient_dob              DATE NULL,
+    patient_weight_kg        DECIMAL(5,2) NULL,
+    patient_neutered         TINYINT(1) NULL,
+    patient_microchip        VARCHAR(100) NULL,
+    clinical_notes           TEXT NULL,
+    vet_name                 VARCHAR(150) NULL,
+    vet_clinic               VARCHAR(190) NULL,
+    vet_email                VARCHAR(190) NULL,
+    vet_phone                VARCHAR(30)  NULL,
+    vet_registration_info    VARCHAR(190) NULL,
+    requested_formulation    ENUM('injection','oral') NOT NULL,
+    status                   ENUM(
+                                 'submitted','under_review','awaiting_information',
+                                 'communication_in_progress','formulation_discussion',
+                                 'approved','compounding','ready_for_dispatch',
+                                 'dispatched','finished','closed','cancelled','rejected'
+                             ) NOT NULL DEFAULT 'submitted',
+    assigned_staff_id        INT UNSIGNED NULL,
+    final_formulation        VARCHAR(100) NULL,
+    final_concentration      VARCHAR(100) NULL,
+    final_quantity           VARCHAR(100) NULL,
+    final_price              DECIMAL(10,2) NULL,
+    closure_reason           TEXT NULL,
+    courier                  VARCHAR(100) NULL,
+    tracking_number          VARCHAR(100) NULL,
+    dispatch_date            DATE NULL,
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_gsreq_staff FOREIGN KEY (assigned_staff_id) REFERENCES staff_users(id),
+    INDEX idx_gsreq_status (status),
+    INDEX idx_gsreq_source (source),
+    INDEX idx_gsreq_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE gs_request_documents (
+    id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gs_request_id      INT UNSIGNED NOT NULL,
+    doc_type           ENUM('prescription','supporting') NOT NULL,
+    stored_filename    VARCHAR(64) NOT NULL,
+    original_filename  VARCHAR(255) NOT NULL,
+    mime_type          VARCHAR(100) NOT NULL,
+    size_bytes         INT UNSIGNED NOT NULL,
+    created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_gsreqdoc_req FOREIGN KEY (gs_request_id) REFERENCES gs_requests(id) ON DELETE CASCADE,
+    INDEX idx_gsreqdoc_req (gs_request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE case_status_history (
+    id                INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gs_request_id     INT UNSIGNED NOT NULL,
+    previous_status   VARCHAR(50) NULL,
+    new_status        VARCHAR(50) NOT NULL,
+    changed_by        INT UNSIGNED NULL,
+    note              TEXT NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_history_req FOREIGN KEY (gs_request_id) REFERENCES gs_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_history_staff FOREIGN KEY (changed_by) REFERENCES staff_users(id),
+    INDEX idx_history_req (gs_request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE case_internal_notes (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gs_request_id  INT UNSIGNED NOT NULL,
+    staff_id       INT UNSIGNED NOT NULL,
+    content        TEXT NOT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_note_req FOREIGN KEY (gs_request_id) REFERENCES gs_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_note_staff FOREIGN KEY (staff_id) REFERENCES staff_users(id),
+    INDEX idx_note_req (gs_request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Schema only for Phase 1 — no UI reads/writes this until the email composer phase.
+CREATE TABLE case_emails (
+    id                 INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gs_request_id      INT UNSIGNED NOT NULL,
+    staff_id           INT UNSIGNED NULL,
+    recipient          VARCHAR(190) NOT NULL,
+    subject            VARCHAR(255) NOT NULL,
+    body               TEXT NOT NULL,
+    brevo_message_id   VARCHAR(190) NULL,
+    delivery_status    VARCHAR(50) NULL,
+    sent_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_email_req FOREIGN KEY (gs_request_id) REFERENCES gs_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_email_staff FOREIGN KEY (staff_id) REFERENCES staff_users(id),
+    INDEX idx_email_req (gs_request_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE consent_records (
+    id                     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    gs_request_id          INT UNSIGNED NOT NULL,
+    consent_type           VARCHAR(50) NOT NULL,
+    consent_text_version   VARCHAR(50) NOT NULL,
+    ip_address             VARCHAR(45) NULL,
+    user_agent             VARCHAR(255) NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_consent_req FOREIGN KEY (gs_request_id) REFERENCES gs_requests(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE audit_log (
+    id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    actor_type     ENUM('staff','system','public') NOT NULL,
+    actor_id       INT UNSIGNED NULL,
+    action         VARCHAR(100) NOT NULL,
+    entity_type    VARCHAR(50) NOT NULL,
+    entity_id      INT UNSIGNED NULL,
+    metadata_json  TEXT NULL,
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_audit_entity (entity_type, entity_id),
+    INDEX idx_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
