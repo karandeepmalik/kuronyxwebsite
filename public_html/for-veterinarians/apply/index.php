@@ -1,7 +1,12 @@
 <?php
-require __DIR__ . '/../../../includes/db.php';
-require __DIR__ . '/../../../includes/auth.php';
-require __DIR__ . '/../../../includes/upload.php';
+require __DIR__ . '/../../includes/db.php';
+require __DIR__ . '/../../includes/auth.php';
+require __DIR__ . '/../../includes/upload.php';
+
+// Must run before any HTML output so the session cookie ships with the first
+// response headers — csrf_field() alone (called later, inside the template)
+// is too late and silently breaks CSRF verification on every submission.
+csrf_token();
 
 $errors  = [];
 $success = false;
@@ -10,7 +15,10 @@ $old     = $_POST ?? [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $errors['_form'] = 'Your session expired. Please review and submit the form again.';
+    } elseif (rate_limited('vet_apply_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 8, 60)) {
+        $errors['_form'] = 'Too many submissions from this connection. Please try again later.';
     } else {
+        record_rate_limit_hit('vet_apply_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
         $fields = [
             'full_name'            => trim($_POST['full_name'] ?? ''),
             'professional_email'   => trim($_POST['professional_email'] ?? ''),
@@ -69,6 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if (!empty($errors) && empty($errors['_form'])) {
+            $errors['_form'] = 'Please check the highlighted fields below and try again.';
+        }
+
         if (empty($errors)) {
             $pdo = db();
             $pdo->beginTransaction();
@@ -98,6 +110,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                          VALUES (?,?,?,?,?)'
                     );
                     foreach ($uploads as $meta) {
+                        relocate_uploaded_file($meta['stored_filename'], 'vet-applications/pending', "vet-applications/{$applicationId}");
                         $docStmt->execute([
                             $applicationId, $meta['stored_filename'], $meta['original_filename'],
                             $meta['mime_type'], $meta['size_bytes'],
@@ -120,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], 'public');
                 gs_session_start();
                 $_SESSION['gs_request_received'] = 'vet_application';
-                header('Location: /gs-441524/request-received');
+                header('Location: /request-received');
                 exit;
             }
         }
@@ -128,14 +141,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle       = 'Apply for a Veterinary Account — GS-441524 | Kuronyx Sciences';
+$pageTitle       = 'Apply for a Veterinary Account — Kuronyx Sciences';
 $pageDescription = 'Apply for a verified Kuronyx veterinary account to submit GS-441524 requests. Applications are reviewed manually before access is granted.';
-$canonical       = 'https://kuronyx.in/gs-441524/veterinarian/apply';
+$canonical       = 'https://kuronyx.in/for-veterinarians/apply';
 $robotsNoindex   = true; // application form itself isn't a content page worth indexing
-$backHref        = '/gs-441524/veterinarian';
-$backLabel       = 'Back';
+$activeNav       = 'for-veterinarians';
 $wideWrap        = true;
-require __DIR__ . '/../../../includes/layout-header.php';
+require __DIR__ . '/../../includes/layout-header.php';
 
 function field_class(array $errors, string $key): string {
     return 'field' . (isset($errors[$key]) ? ' has-error' : '');
@@ -144,7 +156,7 @@ function old_val(array $old, string $key): string {
     return htmlspecialchars($old[$key] ?? '', ENT_QUOTES);
 }
 ?>
-    <p class="doc-eyebrow">GS-441524 · Veterinary account application</p>
+    <p class="doc-eyebrow">For veterinarians · Account application</p>
     <h1 class="doc-title">Apply for a Veterinary Account</h1>
     <p class="doc-meta">Kuronyx Sciences<span class="sep">·</span>Manual review, not instant approval</p>
 
@@ -285,4 +297,4 @@ function old_val(array $old, string $key): string {
 
       <button type="submit" class="btn-primary">Submit Application</button>
     </form>
-<?php require __DIR__ . '/../../../includes/layout-footer.php'; ?>
+<?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

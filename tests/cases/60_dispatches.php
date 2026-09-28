@@ -1,0 +1,45 @@
+<?php
+return function (TestEnv $env): void {
+    run_test('public dispatches list is empty before anything is published', function () use ($env) {
+        $r = http_request('GET', $env->baseUrl . '/dispatches/index.php', ['cookie_jar' => $env->tmpDir . '/cookies-disp-anon.txt']);
+        assert_equal(200, $r['status']);
+        assert_contains('No dispatches published yet', $r['body']);
+    });
+
+    run_test('admin can create and publish a dispatch', function () use ($env) {
+        $jar = $env->cookieJarStaff;
+        $get = http_request('GET', $env->baseUrl . '/admin/dispatches/edit.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/admin/dispatches/edit.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf, 'action' => 'save',
+                'title' => 'A New Oral Formulation', 'slug' => '', 'excerpt' => 'Notes from the bench.',
+                'body' => 'Full text of the dispatch.', 'status' => 'published',
+            ],
+        ]);
+        assert_contains('Dispatch created', $post['body']);
+
+        $row = $env->pdo()->query("SELECT * FROM dispatches WHERE title = 'A New Oral Formulation'")->fetch();
+        assert_true($row !== false);
+        assert_equal('published', $row['status']);
+        assert_equal('a-new-oral-formulation', $row['slug']);
+        assert_true($row['published_at'] !== null);
+        $env->shared['dispatchSlug'] = $row['slug'];
+    });
+
+    run_test('the published dispatch appears on the public list and its own page', function () use ($env) {
+        $list = http_request('GET', $env->baseUrl . '/dispatches/index.php', ['cookie_jar' => $env->tmpDir . '/cookies-disp-anon2.txt']);
+        assert_contains('A New Oral Formulation', $list['body']);
+
+        $slug = $env->shared['dispatchSlug'];
+        $view = http_request('GET', $env->baseUrl . "/dispatches/view.php?slug={$slug}", ['cookie_jar' => $env->tmpDir . '/cookies-disp-anon3.txt']);
+        assert_equal(200, $view['status']);
+        assert_contains('Full text of the dispatch', $view['body']);
+    });
+
+    run_test('an unknown slug 404s', function () use ($env) {
+        $r = http_request('GET', $env->baseUrl . '/dispatches/view.php?slug=does-not-exist', ['cookie_jar' => $env->tmpDir . '/cookies-disp-404.txt']);
+        assert_equal(404, $r['status']);
+    });
+};

@@ -4,6 +4,11 @@
  * Set before including: $pageTitle, $pageDescription, $canonical, $robotsNoindex (bool),
  * $extraHead (raw string, e.g. OG tags), $wideWrap (bool), $backHref, $backLabel.
  */
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit('Forbidden.');
+}
+
 $pageTitle       = $pageTitle ?? 'Kuronyx Sciences';
 $pageDescription = $pageDescription ?? 'Kuronyx Sciences — Indian veterinary compounding pharmacy.';
 $canonical       = $canonical ?? '';
@@ -31,10 +36,11 @@ $backLabel       = $backLabel ?? 'Back to site';
     --serif:"Source Serif 4",Georgia,serif;
     --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",monospace;
     --gutter:clamp(1.25rem,4vw,3rem);
+    --link:#8CC3CB;
   }
   *,*::before,*::after{ margin:0; padding:0; box-sizing:border-box; }
   html,body{ background:var(--navy); color:var(--paper); }
-  body{ font-family:var(--serif); font-weight:300; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; line-height:1.55; }
+  body{ min-height:100vh; min-height:100dvh; display:flex; flex-direction:column; font-family:var(--serif); font-weight:300; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; line-height:1.55; }
   ::selection{ background:var(--teal); color:#0c161e; }
   body::before{
     content:""; position:fixed; inset:0; pointer-events:none; z-index:1;
@@ -52,10 +58,14 @@ $backLabel       = $backLabel ?? 'Back to site';
   }
   .wordmark{ font-family:var(--mono); font-weight:400; font-size:0.875rem; letter-spacing:0.02em; color:var(--paper); text-decoration:none; text-transform:lowercase; display:inline-flex; align-items:center; gap:.5rem; }
   .wordmark img{ height:16px; width:auto; display:block; }
-  .back{ font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.22em; text-transform:uppercase; color:var(--paper-3); text-decoration:none; display:inline-flex; align-items:center; gap:0.5rem; transition:color .25s ease; }
-  .back:hover{ color:var(--paper); }
+  .back{ font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.18em; text-transform:uppercase; color:var(--paper-2); text-decoration:none; display:inline-flex; align-items:center; gap:0.5rem; padding:0.5rem 0.85rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); transition:color .2s ease, border-color .2s ease, background .2s ease; }
+  .back:hover{ color:var(--paper); border-color:var(--teal); background:rgba(88,149,157,0.18); }
   .back .arr{ color:var(--teal); }
-  main{ position:relative; z-index:2; padding:clamp(2.5rem,6vh,5rem) var(--gutter) clamp(3rem,8vh,6rem); }
+  .site-nav{ display:flex; align-items:center; gap:1.1rem; flex-wrap:wrap; justify-content:flex-end; font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.12em; text-transform:uppercase; }
+  .site-nav a{ color:var(--paper-3); text-decoration:none; border-bottom:1px solid transparent; padding-bottom:2px; white-space:nowrap; transition:color .2s ease, border-color .2s ease; }
+  .site-nav a:hover, .site-nav a.active{ color:var(--paper); border-bottom-color:var(--teal); }
+  @media (max-width:720px){ .site-nav{ gap:0.75rem; font-size:0.5625rem; } }
+  main{ flex:1 0 auto; width:100%; position:relative; z-index:2; padding:clamp(2.5rem,6vh,5rem) var(--gutter) clamp(3rem,8vh,6rem); }
   .wrap{ max-width:44rem; margin:0 auto; }
   .wrap.wide{ max-width:68rem; }
   .doc-eyebrow{ font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.22em; text-transform:uppercase; color:var(--paper-3); margin-bottom:1.25rem; display:flex; align-items:center; gap:.6rem; }
@@ -87,8 +97,8 @@ $backLabel       = $backLabel ?? 'Back to site';
   .btn-primary{ display:inline-flex; align-items:center; gap:0.6rem; font-family:var(--mono); font-weight:500; font-size:0.75rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--navy); background:var(--teal); padding:0.9rem 1.5rem; text-decoration:none; border:none; cursor:pointer; transition:opacity .2s ease; }
   .btn-primary:hover{ opacity:0.88; }
   .btn-primary:disabled{ opacity:0.5; cursor:not-allowed; }
-  .btn-secondary{ display:inline-flex; align-items:center; gap:0.6rem; font-family:var(--mono); font-weight:400; font-size:0.75rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--paper); background:transparent; padding:0.85rem 1.4rem; text-decoration:none; border:1px solid var(--rule); cursor:pointer; transition:border-color .2s ease; }
-  .btn-secondary:hover{ border-color:var(--teal); }
+  .btn-secondary{ display:inline-flex; align-items:center; gap:0.6rem; font-family:var(--mono); font-weight:400; font-size:0.75rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--paper); background:rgba(245,245,245,0.04); padding:0.85rem 1.4rem; text-decoration:none; border:1px solid var(--paper-4); cursor:pointer; transition:border-color .2s ease, background .2s ease; }
+  .btn-secondary:hover{ border-color:var(--teal); background:rgba(88,149,157,0.18); }
   .field-row{ display:grid; grid-template-columns:1fr; gap:1.1rem; margin-bottom:1.1rem; }
   .field-row.two{ grid-template-columns:1fr 1fr; }
   .field-row.three{ grid-template-columns:1fr 1fr 1fr; }
@@ -124,12 +134,20 @@ $backLabel       = $backLabel ?? 'Back to site';
   table.data-table th{ font-family:var(--mono); font-weight:500; font-size:0.625rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--paper-3); text-align:left; padding:0.75rem 0.6rem; border-bottom:1px solid var(--rule); }
   table.data-table td{ padding:0.85rem 0.6rem; border-bottom:1px solid var(--rule-2); color:var(--paper-2); vertical-align:top; }
   table.data-table tr:hover td{ background:var(--rule-2); }
-  table.data-table a{ color:var(--paper); border-bottom:1px solid var(--paper-3); text-decoration:none; }
-  table.data-table a:hover{ border-bottom-color:var(--teal); }
+  table.data-table a{ color:var(--link); border-bottom:1px solid var(--link); text-decoration:none; }
+  table.data-table a:hover{ color:var(--paper); border-bottom-color:var(--paper); }
   .table-scroll{ overflow-x:auto; }
   .status-pill{ display:inline-block; font-family:var(--mono); font-size:0.625rem; letter-spacing:0.08em; text-transform:uppercase; padding:0.25rem 0.6rem; border:1px solid var(--rule); color:var(--paper-2); white-space:nowrap; }
   .status-pill.status-approved,.status-pill.status-finished{ border-color:var(--teal); color:var(--teal); }
   .status-pill.status-closed,.status-pill.status-cancelled,.status-pill.status-rejected{ border-color:#ff8787; color:#ff8787; }
+  .admin-nav{ display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; font-family:var(--mono); font-weight:400; font-size:0.6875rem; letter-spacing:0.1em; text-transform:uppercase; margin-top:1.25rem; margin-bottom:1.75rem; padding-bottom:1.25rem; border-bottom:1px solid var(--rule); }
+  .admin-nav a{ color:var(--paper); text-decoration:none; padding:0.6rem 1rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); white-space:nowrap; transition:color .2s ease, border-color .2s ease, background .2s ease; }
+  .admin-nav a:hover{ border-color:var(--teal); background:rgba(88,149,157,0.18); }
+  .admin-nav a.active{ color:var(--navy); background:var(--teal); border-color:var(--teal); font-weight:500; }
+  .admin-nav .signout{ margin-left:auto; color:var(--paper-2); }
+  .admin-nav .signout:hover{ color:#ff8787; border-color:#ff8787; background:rgba(255,135,135,0.1); }
+  .admin-nav a:focus-visible, .back:focus-visible, .btn-secondary:focus-visible, table.data-table a:focus-visible{ outline:2px solid var(--teal); outline-offset:2px; }
+  @media (max-width:640px){ .admin-nav{ font-size:0.625rem; } .admin-nav a{ padding:0.5rem 0.7rem; } .admin-nav .signout{ margin-left:0; } }
   .filter-bar{ display:flex; gap:1rem; flex-wrap:wrap; align-items:end; margin-bottom:1.75rem; padding-bottom:1.5rem; border-bottom:1px solid var(--rule); }
   .filter-bar .field{ min-width:10rem; }
   .card-panel{ border:1px solid var(--rule); padding:1.5rem; margin-bottom:1.5rem; }
@@ -141,7 +159,7 @@ $backLabel       = $backLabel ?? 'Back to site';
   .note-item{ padding:0.85rem 0; border-bottom:1px solid var(--rule-2); font-size:0.8125rem; }
   .note-item .note-meta{ font-family:var(--mono); font-size:0.625rem; letter-spacing:0.08em; color:var(--paper-4); text-transform:uppercase; margin-bottom:0.35rem; }
   .note-item .note-body{ color:var(--paper-2); white-space:pre-wrap; }
-  footer.foot{ position:relative; z-index:2; border-top:1px solid var(--rule); padding:2rem var(--gutter); display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:center; font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.18em; text-transform:uppercase; color:var(--paper-3); }
+  footer.foot{ flex-shrink:0; position:relative; z-index:2; border-top:1px solid var(--rule); padding:2rem var(--gutter); display:grid; grid-template-columns:1fr auto 1fr; gap:1rem; align-items:center; font-family:var(--mono); font-weight:400; font-size:0.625rem; letter-spacing:0.18em; text-transform:uppercase; color:var(--paper-3); }
   footer.foot .legal{ justify-self:start; }
   footer.foot .domain{ justify-self:center; }
   footer.foot .place{ justify-self:end; }
@@ -152,8 +170,25 @@ $backLabel       = $backLabel ?? 'Back to site';
 </head>
 <body>
 <header class="chrome">
-  <a class="wordmark" href="/"><img src="/assets/logoNoBG.png" alt="Kuronyx Logo"> kurony<span style="color:var(--teal)">✗</span></a>
-  <a class="back" href="<?= htmlspecialchars($backHref, ENT_QUOTES) ?>"><span class="arr">←</span> <?= htmlspecialchars($backLabel, ENT_QUOTES) ?></a>
+  <a class="wordmark" href="/"><img src="/assets/logoNoBG.png" alt="Kuronyx"></a>
+  <nav class="site-nav" aria-label="Primary">
+    <?php
+    $activeNav = $activeNav ?? '';
+    $navItems = [
+        'about'            => ['/about', 'About'],
+        'for-veterinarians' => ['/for-veterinarians', 'For Veterinarians'],
+        'for-cat-owners'    => ['/for-cat-owners', 'For Cat Owners'],
+        'dispatches'        => ['/dispatches', 'Dispatches'],
+        'contact-us'        => ['/contact-us', 'Contact Us'],
+    ];
+    foreach ($navItems as $key => [$href, $label]):
+    ?>
+      <a href="<?= htmlspecialchars($href, ENT_QUOTES) ?>" <?= $activeNav === $key ? 'class="active"' : '' ?>><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
+    <?php endforeach; ?>
+  </nav>
 </header>
 <main>
   <div class="wrap<?= !empty($wideWrap) ? ' wide' : '' ?>">
+    <?php if (!empty($backHref) && $backHref !== '/'): ?>
+      <a class="back" href="<?= htmlspecialchars($backHref, ENT_QUOTES) ?>" style="display:inline-flex; margin-bottom:1.5rem;"><span class="arr">←</span> <?= htmlspecialchars($backLabel ?? 'Back', ENT_QUOTES) ?></a>
+    <?php endif; ?>

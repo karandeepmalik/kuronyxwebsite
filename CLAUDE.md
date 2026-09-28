@@ -4,26 +4,75 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-The marketing website for Kuronyx Sciences (a veterinary compounding pharmacy), served as static PHP/HTML/JS from `public_html/` — no build step, no package manager, no framework. `public_html/` is deployed as-is to Hostinger shared hosting.
+The Kuronyx Sciences (veterinary compounding pharmacy) website and back office, served as static/dynamic PHP/HTML/JS from `public_html/` — no build step, no package manager, no framework. `public_html/` is deployed as-is to Hostinger shared hosting. Beyond the marketing pages, the site also runs a DB-backed public intake system (GS-441524 prescription requests, veterinary account applications) and a staff admin panel — see "GS-441524 platform" below.
 
 ## Architecture
 
-- `public_html/index.html` — the entire site is one long single-page HTML document (hero, "what we are", "why this matters", credentials, vets, dispatches/newsletter, enquiry form) with inline `<style>` and inline `<script>` for scroll-reveal, the section rail/progress indicator, and the enquiry form submit handler. There is no templating; edit sections directly in this file.
-- `public_html/js/subscribe.js` — standalone handler for the newsletter subscribe form (`#subscribeForm`), separate from the inline enquiry-form script in `index.html`.
-- `public_html/php/` — backend endpoints called via `fetch()` from the front end:
-  - `config.php` — defines Brevo API constants (`BREVO_API_KEY`, template IDs, list ID, sender/receiver emails). Required by every other PHP file via `require_once 'config.php'`.
-  - `send-welcome.php` — called by `subscribe.js` on newsletter signup; sends a Brevo welcome email, then adds the contact to the Brevo list only if the email send succeeded.
-  - `send-enquiry.php` — called by the inline enquiry-form script; validates the contact fields server-side and sends the enquiry to `RECEIVER_EMAIL` via a Brevo template.
-  - `unsubscribe.php` — GET-based landing page (linked from emails) that removes an email from Brevo list 7 and renders a static confirmation page inline.
-  - `webhook.php` — Brevo webhook receiver; on a `delivered` event, upserts the contact into the Brevo list. Appends every request to `webhook.log` in the same directory regardless of outcome.
-- Both `send-welcome.php` and `send-enquiry.php` implement the same CORS pattern: allow `https://kuronyx.in`, `https://www.kuronyx.in`, and localhost/127.0.0.1, reflect the origin back, and short-circuit `OPTIONS` preflight requests. Keep this pattern consistent if you touch either file.
-- Forms also POST to Netlify's form-handling endpoint (`fetch('/', ...)`) as a backup/mirror submission alongside the Brevo call — this is intentional duplication, not dead code.
+### Marketing site
+- `public_html/index.html` — a long single-page HTML document (hero, "what we are", "why this matters", credentials, dispatches/newsletter, enquiry form) with inline `<style>` and inline `<script>` for scroll-reveal and the section rail. No templating; edit sections directly.
+- `public_html/about/`, `for-veterinarians/`, `for-cat-owners/`, `contact-us/`, `dispatches/`, `request-received/` — routed pages (each a directory with `index.php`), sharing chrome via `includes/layout-header.php` / `layout-footer.php`. A page sets `$pageTitle`, `$pageDescription`, `$canonical`, `$robotsNoindex`, `$activeNav`, `$wideWrap`, `$backHref`/`$backLabel` before including the header.
+- `public_html/js/subscribe.js` — standalone handler for the newsletter subscribe form (`#subscribeForm`) on `/dispatches`.
 - `public_html/Privacy Policy.html` — standalone static page, not linked into the SPA's section rail.
+
+### Legacy Brevo endpoints (`public_html/php/`)
+Called via `fetch()` from the front end. Predate the GS-441524 platform — these were part of the original single-page site, not this project's work.
+  - `config.php` — thin shim; requires `../includes/db-config.php` for the actual Brevo constants (see "Secrets" below). Kept only so `send-welcome.php`/`send-enquiry.php`'s `require_once 'config.php'` still works.
+  - `send-welcome.php` — called by `subscribe.js` on newsletter signup; sends a Brevo welcome email, then adds the contact to the Brevo list only if the email send succeeded.
+  - `send-enquiry.php` — called by the inline enquiry-form script on `/contact-us`; validates fields server-side and sends the enquiry to `RECEIVER_EMAIL` via a Brevo template.
+  - `unsubscribe.php` — GET-based landing page (linked from emails) that removes an email from Brevo list 7. No ownership proof on the `?email=` param — anyone can unsubscribe any address; not yet fixed (low severity, tracked but not urgent).
+  - `webhook.php` — Brevo webhook receiver; requires a `?secret=` query param matching `BREVO_WEBHOOK_SECRET` (added 2026-09-13 — see "Known issue" below) before doing anything else. On a `delivered` event, upserts the contact into the Brevo list. Logs every request to `webhook.log` under `private_storage_path()` (off-webroot — moved there the same day, see below).
+- `send-welcome.php`/`send-enquiry.php` share a CORS pattern: allow `https://kuronyx.in`, `https://www.kuronyx.in`, and localhost/127.0.0.1 for the `Access-Control-Allow-Origin` response header, AND now also reject (403) processing entirely when the Origin isn't recognized — the allow-list used to only control whether a browser could *read* the response, not whether the server acted on the request, which meant a `mode:'no-cors'` + `text/plain` fetch from any site could silently trigger a real send. Both also rate-limit by IP via `rate_limited()`/`record_rate_limit_hit()` (`includes/auth.php`, backed by the `rate_limit_hits` table) — 5 requests/hour. Keep this pattern consistent if you touch either file.
+- `public_html/php/.htaccess` denies direct access to `.log`/`.env`/`.ini`/`.bak`/`.sql` files in that folder — defense in depth on top of no longer writing anything there.
+- Forms also POST to Netlify's form-handling endpoint (`fetch('/', ...)`) as a backup/mirror submission alongside the Brevo call — intentional duplication, not dead code.
+- `/for-cat-owners` and `/for-veterinarians/apply` (the DB-backed intake forms, not the legacy endpoints above) are also rate-limited the same way (8 submissions/hour/IP) via the same `rate_limited()` helper, to stop scripted flooding of storage/DB with fake submissions.
+
+### GS-441524 platform (DB-backed intake + admin)
+- **Data**: `db/schema.sql` is the canonical MySQL schema (run once against the Hostinger DB); `db/schema.sqlite.sql` is a hand-maintained SQLite mirror used by local dev and the test suite (no build step generates it — update both when the schema changes). `db/migrations/` holds incremental ALTERs for already-provisioned databases.
+- **Shared includes** (`public_html/includes/`, each self-guards against direct HTTP access):
+  - `db.php` — `db(): PDO`, driver toggle via `DB_DRIVER` (`mysql` in prod, `sqlite` for local dev/tests). Also installs a site-wide exception handler that never leaks stack traces to visitors.
+  - `db-config.php` — **gitignored**, created manually per environment. Copy `db-config.sample.php`. Holds DB credentials, `PRIVATE_STORAGE_PATH`, `SETUP_TOKEN`, and all Brevo settings (`BREVO_API_KEY`, template IDs, sender/receiver, `BREVO_VERIFIED_SENDERS`, `EMAIL_DRY_RUN`) — this is the single source of secrets for the whole app, including the legacy `php/config.php` shim.
+  - `auth.php` — staff session (`kuronyx_staff_sid`), `csrf_token()`/`csrf_field()`/`csrf_verify()`, `current_staff()`/`require_login()`/`require_role([...])`, login lockout (8 attempts/15min via `login_attempts`), `audit($action, $entityType, $entityId, $metadata, $actorType)`.
+  - `mailer.php` — `verified_senders()` (the `BREVO_VERIFIED_SENDERS` allow-list, falling back to the single `SENDER_EMAIL`), `send_transactional_email()` (raw Brevo send with an optional `$fromEmail`/`$fromName` override that must be a verified sender, respects `EMAIL_DRY_RUN`) and `send_case_email()` (sends + always logs to `case_emails`, including the `sender` used, even on failure). Nothing in the app sends an email on its own — every send is a staff-initiated `send_email` action from an admin compose form.
+  - Password reset helpers in `auth.php` — `issue_password_reset()` / `find_password_reset_account()` / `complete_password_reset()` (whitelisted to `staff_users` and `vet_accounts`; only a SHA-256 hash of the one-time token is stored, 60-minute expiry, cleared on use) and `site_url()` (emailed links are built from `SITE_URL`/`https://kuronyx.in`, never the request's Host header, to prevent reset-link poisoning). Pages: `admin/forgot-password.php` + `admin/reset-password.php` (staff and admins share `staff_users`) and `for-veterinarians/forgot-password.php` + `reset-password.php` (only `status='active'` vet accounts — pending ones still use their activation link, suspended ones stay locked out). This is the one place the app emails automatically, because the requester is the account holder; it's capped at 3 emails/address/hour and 15 requests/IP/hour, and the response is identical whether or not an account exists.
+  - `upload.php` / `storage-path.php` — `store_uploaded_file()` validates PDF/JPG/PNG up to 10MB and stores off-webroot under `PRIVATE_STORAGE_PATH`; never web-accessible directly.
+  - `layout-header.php` / `layout-footer.php` — shared chrome for every routed page above and every admin page.
+- **Public intake**: `/for-veterinarians/apply` (→ `vet_applications` + `vet_application_documents`), `/for-cat-owners` (→ `gs_requests` + `gs_request_documents`, prescription upload required). Both redirect to `/request-received` on success and show a generic "check the highlighted fields" banner on validation failure (no per-field message text is rendered — only the `has-error` CSS class).
+- **Staff admin** (`public_html/admin/`, session + CSRF + `require_role`):
+  - `login.php` / `logout.php` / `setup.php` (one-time, token-gated first-admin creation via `SETUP_TOKEN`).
+  - `gs-requests/` — list/filter, per-case status changes (+ history, no email side effect), internal notes, final formulation/fulfilment fields, staff assignment, and a "Send an email" panel: a template dropdown (`$emailTemplates` in `view.php`, one per owner-facing status, rebuilt each render from the case's current final-formulation/price/courier fields), a sender dropdown restricted to `verified_senders()`, and a recipient dropdown restricted to this case's own `owner_email`/`vet_email` (never an arbitrary address — enforced server-side too, not just by the dropdown). Staff edit the template (formulation, price, payment link, etc.) before hitting Send; a "No Email Needed" button records that choice (`email_not_needed` audit entry) without sending anything. Nothing is ever sent automatically. Sent/failed messages are logged to `case_emails` (now including `sender`) regardless of outcome.
+  - `veterinary-applications/` — list/filter, approve/reject/request-info/suspend (append-only `internal_notes` log, no email side effect). Approving provisions a `vet_accounts` row (see below) but does not email it; a "Generate Activation Link" button (re)creates the token on demand and shows the raw URL for that render only (the raw token is never persisted, so it can only appear right after being generated) so it can be reviewed and sent via the same template/sender/recipient "Send an email" panel as gs-requests, or explicitly marked "No Email Needed." Suspending an application also suspends its linked `vet_accounts` row so portal access is revoked immediately.
+  - `dispatches/` — CMS for the public `/dispatches` blog (draft/publish, slug auto-generation).
+  - `audit-log/` — admin-only (`require_role(['admin'])`), paginated.
+  - `staff/` — admin-only; list/create staff accounts and toggle `active` (deactivating is re-checked by `require_login()` on every request, so it takes effect immediately, not on next login; an admin can't deactivate their own account).
+  - `download.php` (site root) — the only way documents are ever served; staff can access any document, a signed-in vet only documents on their own `gs_requests` (never `vet_application` documents); authenticated + audited (`document_accessed`).
+- **Veterinarian portal** (`public_html/for-veterinarians/`) — a separate session identity (`current_vet()`/`require_vet_login()` in `auth.php`) sharing the same session cookie as staff; logging into one clears any lingering identity from the other (`admin/login.php` and `for-veterinarians/login.php` both `unset()` the other's session key, since `session_regenerate_id()` otherwise carries `$_SESSION` forward). `login.php`, `activate.php` (token-based password set-up after approval, 7-day expiry, hashed token), `portal/index.php` (dashboard of the vet's own `gs_requests`), `portal/new-request.php` (submits directly with `source='veterinarian'` and `vet_account_id` set — a signed prescription upload is required per request, same as the cat-owner form, stored as a `gs_request_documents` row with `doc_type='prescription'`), `portal/view.php` (read-only case view, no internal notes/staff fields), `portal/logout.php`.
+
+## Local development
+
+No local dev server or build step is required beyond PHP itself. `local-dev/` (gitignored) holds a machine-specific SQLite DB, off-webroot storage, and a `php.ini` enabling `pdo_sqlite`/`pdo_mysql`/`fileinfo`/`mbstring`. Typical loop:
+```
+php -c local-dev/php.ini -S localhost:8000 -t public_html
+```
+`public_html/includes/db-config.php` (gitignored, copy from `db-config.sample.php`) points at the local SQLite file with `DB_DRIVER=sqlite` and carries a local `SETUP_TOKEN`.
+
+## Testing
+
+`tests/` is a zero-dependency PHP integration test suite (no Composer is installed, and none is needed elsewhere in the project). Run it with:
+```
+php tests/run.php
+```
+It self-bootstraps the right PHP extensions, starts a throwaway `php -S` instance against `public_html/` backed by a disposable SQLite DB (`db/schema.sqlite.sql`), drives it with curl (sessions, CSRF, multipart uploads), and tears everything down — including restoring your real `db-config.php` exactly as it was. `EMAIL_DRY_RUN` is set for the test run so no real Brevo API calls happen. Add new cases under `tests/cases/` (numbered files, each returning a closure that takes the shared `TestEnv $env`).
 
 ## Deployment
 
-`.github/workflows/deploy.yml` auto-deploys on every push to `main`: it FTPS-syncs `public_html/` to `/domains/kuronyx.in/public_html/` on Hostinger via `SamKirkland/FTP-Deploy-Action`, using `FTP_SERVER`/`FTP_USERNAME`/`FTP_PASSWORD` repo secrets. There is no CI build/test step — whatever is in `public_html/` on `main` goes live as-is. There is no local dev server or test suite in this repo; verify changes by opening `public_html/index.html` directly or serving the folder with any static file server (note the PHP endpoints won't run without a PHP server, e.g. `php -S localhost:8000 -t public_html`).
+`.github/workflows/deploy.yml` auto-deploys on every push to `main`: it FTPS-syncs `public_html/` to `/domains/kuronyx.in/public_html/` on Hostinger via `SamKirkland/FTP-Deploy-Action`, using `FTP_SERVER`/`FTP_USERNAME`/`FTP_PASSWORD` repo secrets. There is no CI build/test step — whatever is in `public_html/` on `main` goes live as-is (run `php tests/run.php` yourself before pushing). Note `db/` and `tests/` live outside `public_html/` and are never deployed; DB migrations and `db-config.php` are applied to the server by hand.
 
-## Known issue — exposed secret
+## Known issue — rotate the exposed Brevo key
 
-`public_html/php/config.php` is tracked in git and deployed publicly, but contains a live Brevo API key (`BREVO_API_KEY`), despite its own comment saying "never commit to git." This repo's remote (`karandeepmalik/kuronyxwebsite`) — if flip to private isn't already planned, the key should be rotated in Brevo and moved out of version control (e.g. read from a server-side env var or an untracked file). Flag this to the user before assuming it's already handled.
+`public_html/php/config.php` used to be tracked in git with a live Brevo API key hardcoded in it. As of 2026-09-12 the key has been moved to `includes/db-config.php` (gitignored) and `config.php` no longer contains any secret — but the key value itself was exposed in git history for some time. **Removing it from the working tree does not erase it from history.** The key should still be rotated in Brevo (Settings → SMTP & API → API Keys) and the new value placed only in each environment's own `db-config.php`. Flag this to the user before assuming it's already been done.
+
+## Known issue — manual production steps required after the 2026-09-13 webhook fix
+
+`public_html/php/webhook.php` had no authentication and logged every request (including real Brevo delivery events — subscriber emails, IPs) to `webhook.log` inside `public_html/php/`, which had no `.htaccess` protection. That log was confirmed publicly downloadable at `https://kuronyx.in/php/webhook.log` before this fix. The code now requires a `?secret=` matching `BREVO_WEBHOOK_SECRET` and logs off-webroot instead — but **two things still need doing by hand on the live server, and neither can be done from this repo**:
+1. Delete the existing `public_html/php/webhook.log` from the live server (File Manager/FTP) — deploying the fix does not remove a file that's already there.
+2. Update the webhook URL registered in Brevo (Settings → Webhooks) to include `?secret=<value of BREVO_WEBHOOK_SECRET in production's db-config.php>`, and add `BREVO_WEBHOOK_SECRET` to that file if it isn't there yet — otherwise the webhook will start failing with 403s once this code ships. Flag this to the user before assuming either step is already done.

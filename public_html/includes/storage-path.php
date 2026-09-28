@@ -1,4 +1,9 @@
 <?php
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit('Forbidden.');
+}
+
 require_once __DIR__ . '/db-config.php';
 
 // Absolute path to the off-webroot document store. Falls back to a local

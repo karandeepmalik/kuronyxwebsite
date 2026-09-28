@@ -37,13 +37,7 @@ require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · <?= htmlspecialchars($staff['name'], ENT_QUOTES) ?> (<?= htmlspecialchars($staff['role'], ENT_QUOTES) ?>)</p>
     <h1 class="doc-title">GS-441524 Requests</h1>
-    <p class="lead" style="margin-bottom:0.5rem;">
-      <a href="/admin/veterinary-applications/" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Veterinary applications</a>
-      &nbsp;·&nbsp;
-      <a href="/admin/audit-log/" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Audit log</a>
-      &nbsp;·&nbsp;
-      <a href="/admin/logout.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Sign out</a>
-    </p>
+    <?php $activeAdminNav = 'gs-requests'; require __DIR__ . '/../../includes/admin-nav.php'; ?>
 
     <form method="GET" class="filter-bar">
       <label class="field">
@@ -97,8 +91,8 @@ require __DIR__ . '/../../includes/layout-header.php';
             <td><?= htmlspecialchars($r['patient_name'], ENT_QUOTES) ?></td>
             <td><?= ucfirst($r['requested_formulation']) ?></td>
             <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $r['status'])) ?></span></td>
-            <td><?= htmlspecialchars($r['created_at'], ENT_QUOTES) ?></td>
-            <td><?= htmlspecialchars($r['updated_at'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars(fmt_time($r['created_at']), ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars(fmt_time($r['updated_at']), ENT_QUOTES) ?></td>
           </tr>
         <?php endforeach; ?>
       </tbody>

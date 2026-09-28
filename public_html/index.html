@@ -230,9 +230,9 @@
     white-space:nowrap;
   }
   .chrome .meta .sep{ color:var(--paper-4); }
-  .chrome .meta a.gs-link{ color:var(--paper-2); text-decoration:none; border-bottom:1px solid var(--paper-4); padding-bottom:1px; transition:color .25s ease,border-color .25s ease; }
-  .chrome .meta a.gs-link:hover{ color:var(--teal); border-bottom-color:var(--teal); }
-  @media (max-width:720px){ header.chrome .meta a.gs-link{ display:inline; } }
+  .chrome .meta.site-nav{ flex-wrap:wrap; row-gap:0.4rem; }
+  .chrome .meta.site-nav a{ color:var(--paper-2); text-decoration:none; border-bottom:1px solid var(--paper-4); padding-bottom:1px; transition:color .25s ease,border-color .25s ease; }
+  .chrome .meta.site-nav a:hover{ color:var(--teal); border-bottom-color:var(--teal); }
 
   /* ——— left telemetry rail ——— */
   .rail{
@@ -819,13 +819,15 @@
     <span class="dot"></span>
     <span id="centerLabel">SYS · IDLE</span>
   </span>
-  <span class="meta">
-    <a class="gs-link" href="/gs-441524">GS-441524</a>
+  <nav class="meta site-nav" aria-label="Primary">
+    <a href="/about">About</a>
+    <a href="/for-veterinarians">For Veterinarians</a>
+    <a href="/for-cat-owners">For Cat Owners</a>
+    <a href="/dispatches">Dispatches</a>
+    <a href="/contact-us">Contact Us</a>
     <span class="sep">·</span>
     <span id="clock">—</span>
-    <span class="sep">·</span>
-    <span style="white-space:nowrap;">IST · 19.127733°N 72.834761°E</span>
-  </span>
+  </nav>
 </header>
 
 <nav class="rail" aria-label="Section navigation">

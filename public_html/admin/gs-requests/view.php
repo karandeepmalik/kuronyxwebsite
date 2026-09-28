@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/../../includes/db.php';
 require __DIR__ . '/../../includes/auth.php';
+require __DIR__ . '/../../includes/mailer.php';
 $staff = require_login();
 
 $id = (int) ($_GET['id'] ?? 0);
@@ -36,7 +37,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         ->execute([$id, $case['status'], $newStatus, $staff['id'], $note ?: null]);
                     $pdo->commit();
                     audit('case_status_changed', 'gs_request', $id, ['from' => $case['status'], 'to' => $newStatus]);
-                    $flash = ['type' => 'ok', 'text' => 'Status updated.'];
+                    $flash = ['type' => 'ok', 'text' => 'Status updated. Nothing is emailed automatically — use "Send an email" below if the owner needs to be told.'];
                     $case['status'] = $newStatus;
                 } catch (Throwable $e) {
                     $pdo->rollBack();
@@ -77,6 +78,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             audit('case_assigned', 'gs_request', $id, ['assigned_staff_id' => $assignedId]);
             $flash = ['type' => 'ok', 'text' => 'Assignment updated.'];
             $case['assigned_staff_id'] = $assignedId;
+        } elseif ($action === 'send_email') {
+            $senderEmail = trim($_POST['sender'] ?? '');
+            $recipient   = trim($_POST['recipient'] ?? '');
+            $subject     = trim($_POST['subject'] ?? '');
+            $body        = trim($_POST['body'] ?? '');
+            // Recipient is restricted to email addresses this case's own requester
+            // typed in at submission (owner/vet) — never an arbitrary address — and
+            // sender to Brevo-verified addresses only. mailer.php enforces the sender
+            // restriction again server-side regardless of what this form allows.
+            $allowedRecipients = array_filter([$case['owner_email'], $case['vet_email']]);
+            if (!array_key_exists($senderEmail, verified_senders())) {
+                $flash = ['type' => 'err', 'text' => 'Select a valid sender address.'];
+            } elseif (!in_array($recipient, $allowedRecipients, true)) {
+                $flash = ['type' => 'err', 'text' => 'Recipient must be an email address on file for this case.'];
+            } elseif ($subject === '' || $body === '') {
+                $flash = ['type' => 'err', 'text' => 'Subject and message body are required.'];
+            } else {
+                $recipientName = $recipient === $case['owner_email'] ? $case['owner_full_name'] : ($recipient === $case['vet_email'] ? ($case['vet_name'] ?? '') : '');
+                $sent = send_case_email($pdo, $id, $staff['id'], $recipient, $recipientName, $subject, $body, $senderEmail);
+                audit($sent ? 'email_sent' : 'email_failed', 'gs_request', $id, ['recipient' => $recipient, 'sender' => $senderEmail]);
+                $flash = $sent
+                    ? ['type' => 'ok', 'text' => 'Email sent.']
+                    : ['type' => 'err', 'text' => 'Email failed to send. The attempt has been logged below.'];
+            }
+        } elseif ($action === 'no_email_needed') {
+            audit('email_not_needed', 'gs_request', $id, ['status' => $case['status']]);
+            $flash = ['type' => 'ok', 'text' => 'Noted — no email needed for this update.'];
         }
     }
 }
@@ -93,7 +121,71 @@ $history = $pdo->prepare('SELECT h.*, s.name AS staff_name FROM case_status_hist
 $history->execute([$id]);
 $history = $history->fetchAll();
 
+$emails = $pdo->prepare('SELECT e.*, s.name AS staff_name FROM case_emails e LEFT JOIN staff_users s ON s.id = e.staff_id WHERE e.gs_request_id = ? ORDER BY e.sent_at DESC');
+$emails->execute([$id]);
+$emails = $emails->fetchAll();
+
 $allStaff = $pdo->query('SELECT id, name FROM staff_users ORDER BY name ASC')->fetchAll();
+
+// Predefined email templates, one per owner-facing status plus a blank/custom option.
+// Rebuilt fresh on every render from the case's current final-formulation/fulfilment
+// fields, so a template already reflects whatever's been recorded above — staff still
+// review and edit before sending (formulation, price, payment link, etc. are never
+// sent without a human reading them first).
+$ref = "Reference: GS-{$id}";
+$formulationLine = $case['final_formulation']
+    ? 'Formulation: ' . $case['final_formulation']
+        . ($case['final_concentration'] ? ' (' . $case['final_concentration'] . ')' : '')
+        . ($case['final_quantity'] ? ', Qty: ' . $case['final_quantity'] : '')
+    : 'Formulation: [confirm final formulation, strength & quantity]';
+$priceLine = $case['final_price'] !== null && $case['final_price'] !== ''
+    ? 'Price: Rs. ' . number_format((float) $case['final_price'], 2)
+    : 'Price: [confirm final price]';
+$paymentLine   = 'Payment link: [insert payment link]';
+$trackingLine  = 'Courier: ' . ($case['courier'] ?: '[courier name]') . "\nTracking: " . ($case['tracking_number'] ?: '[tracking number]');
+
+$emailTemplates = [
+    'blank' => [
+        'label'   => '— Blank / custom —',
+        'subject' => "Update on your GS-441524 request (GS-{$id})",
+        'body'    => '',
+    ],
+    'awaiting_information' => [
+        'label'   => 'Awaiting Information',
+        'subject' => "Additional information needed — GS-{$id}",
+        'body'    => "We need some additional information before we can proceed with your request. Our team will be in touch with specifics.\n\n{$ref}",
+    ],
+    'approved' => [
+        'label'   => 'Approved / Confirmed',
+        'subject' => "Your GS-441524 request has been approved (GS-{$id})",
+        'body'    => "Your GS-441524 request has been approved and is moving forward.\n\n{$formulationLine}\n{$priceLine}\n{$paymentLine}\n\n{$ref}",
+    ],
+    'ready_for_dispatch' => [
+        'label'   => 'Ready for Dispatch',
+        'subject' => "Your order is being prepared for dispatch (GS-{$id})",
+        'body'    => "Your order has been compounded and is being prepared for dispatch.\n\n{$formulationLine}\n{$priceLine}\n{$paymentLine}\n\n{$ref}",
+    ],
+    'dispatched' => [
+        'label'   => 'Dispatched',
+        'subject' => "Your order has been dispatched (GS-{$id})",
+        'body'    => "Your order has been dispatched.\n\n{$trackingLine}\n\n{$ref}",
+    ],
+    'finished' => [
+        'label'   => 'Finished',
+        'subject' => "Your order is complete (GS-{$id})",
+        'body'    => "Your order has been completed.\n\n{$ref}",
+    ],
+    'rejected' => [
+        'label'   => 'Rejected',
+        'subject' => "Update on your GS-441524 request (GS-{$id})",
+        'body'    => "Your GS-441524 request could not be approved.\n\n{$ref}",
+    ],
+    'cancelled' => [
+        'label'   => 'Cancelled',
+        'subject' => "Your GS-441524 request has been cancelled (GS-{$id})",
+        'body'    => "Your GS-441524 request has been cancelled.\n\n{$ref}",
+    ],
+];
 
 $pageTitle     = "GS-{$id} — Kuronyx Admin";
 $robotsNoindex = true;
@@ -107,7 +199,7 @@ require __DIR__ . '/../../includes/layout-header.php';
     <p class="doc-meta">
       <?= $case['source'] === 'cat_owner' ? 'Cat owner submission' : 'Veterinarian submission' ?><span class="sep">·</span>
       <span class="status-pill status-<?= htmlspecialchars($case['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $case['status'])) ?></span><span class="sep">·</span>
-      Created <?= htmlspecialchars($case['created_at'], ENT_QUOTES) ?>
+      Created <?= htmlspecialchars(fmt_time($case['created_at']), ENT_QUOTES) ?>
     </p>
 
     <?php if ($flash): ?>
@@ -161,7 +253,7 @@ require __DIR__ . '/../../includes/layout-header.php';
         <div class="note-item">
           <span class="status-pill" style="margin-right:0.6rem;"><?= $d['doc_type'] === 'prescription' ? 'Prescription' : 'Supporting' ?></span>
           <a href="/download.php?kind=gs_request&doc_id=<?= (int) $d['id'] ?>" target="_blank" rel="noopener noreferrer" style="color:var(--paper); border-bottom:1px solid var(--paper-3);"><?= htmlspecialchars($d['original_filename'], ENT_QUOTES) ?></a>
-          <span style="color:var(--paper-4); font-size:0.75rem;"> · <?= htmlspecialchars($d['created_at'], ENT_QUOTES) ?></span>
+          <span style="color:var(--paper-4); font-size:0.75rem;"> · <?= htmlspecialchars(fmt_time($d['created_at']), ENT_QUOTES) ?></span>
         </div>
       <?php endforeach; ?>
     </div>
@@ -214,7 +306,7 @@ require __DIR__ . '/../../includes/layout-header.php';
       <h2 style="margin-top:2rem;">History</h2>
       <?php foreach ($history as $h): ?>
         <div class="note-item">
-          <div class="note-meta"><?= htmlspecialchars($h['staff_name'] ?? 'System', ENT_QUOTES) ?> · <?= htmlspecialchars($h['created_at'], ENT_QUOTES) ?></div>
+          <div class="note-meta"><?= htmlspecialchars($h['staff_name'] ?? 'System', ENT_QUOTES) ?> · <?= htmlspecialchars(fmt_time($h['created_at']), ENT_QUOTES) ?></div>
           <div class="note-body"><?= $h['previous_status'] ? ucwords(str_replace('_',' ',$h['previous_status'])) . ' → ' : '' ?><?= ucwords(str_replace('_',' ',$h['new_status'])) ?><?= $h['note'] ? ' — ' . htmlspecialchars($h['note'], ENT_QUOTES) : '' ?></div>
         </div>
       <?php endforeach; ?>
@@ -252,14 +344,71 @@ require __DIR__ . '/../../includes/layout-header.php';
       </form>
       <?php foreach ($notes as $n): ?>
         <div class="note-item">
-          <div class="note-meta"><?= htmlspecialchars($n['staff_name'], ENT_QUOTES) ?> · <?= htmlspecialchars($n['created_at'], ENT_QUOTES) ?></div>
+          <div class="note-meta"><?= htmlspecialchars($n['staff_name'], ENT_QUOTES) ?> · <?= htmlspecialchars(fmt_time($n['created_at']), ENT_QUOTES) ?></div>
           <div class="note-body"><?= htmlspecialchars($n['content'], ENT_QUOTES) ?></div>
         </div>
       <?php endforeach; ?>
     </div>
 
     <div class="card-panel">
-      <h2>Communication history</h2>
-      <p style="font-size:0.8125rem; color:var(--paper-3);">Manual email composer is coming in a later phase. For now, record any email/phone communication with the veterinarian or owner as an internal note above.</p>
+      <h2>Send an email</h2>
+      <p class="field-hint" style="margin-bottom:1rem;">Nothing is ever sent automatically. Pick a template, review and edit the formulation, price and payment link, then send it yourself — or mark that no email is needed.</p>
+      <form method="POST">
+        <?= csrf_field() ?>
+        <div class="field-row two">
+          <label class="field">
+            <span class="lbl">Template</span>
+            <select id="email-template" data-templates="<?= htmlspecialchars(json_encode($emailTemplates), ENT_QUOTES) ?>">
+              <?php foreach ($emailTemplates as $key => $t): ?>
+                <option value="<?= htmlspecialchars($key, ENT_QUOTES) ?>"><?= htmlspecialchars($t['label'], ENT_QUOTES) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+          <label class="field">
+            <span class="lbl">Sender</span>
+            <select name="sender">
+              <?php foreach (verified_senders() as $email => $name): ?>
+                <option value="<?= htmlspecialchars($email, ENT_QUOTES) ?>"><?= htmlspecialchars($name, ENT_QUOTES) ?> &lt;<?= htmlspecialchars($email, ENT_QUOTES) ?>&gt;</option>
+              <?php endforeach; ?>
+            </select>
+          </label>
+        </div>
+        <div class="field-row two">
+          <label class="field">
+            <span class="lbl">Recipient</span>
+            <select name="recipient">
+              <?php if ($case['owner_email']): ?><option value="<?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?>">Owner — <?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?></option><?php endif; ?>
+              <?php if ($case['vet_email']): ?><option value="<?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?>">Veterinarian — <?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?></option><?php endif; ?>
+            </select>
+          </label>
+          <label class="field">
+            <span class="lbl">Subject</span>
+            <input type="text" id="email-subject" name="subject" value="<?= htmlspecialchars($emailTemplates['blank']['subject'], ENT_QUOTES) ?>">
+          </label>
+        </div>
+        <label class="field">
+          <span class="lbl">Message</span>
+          <textarea id="email-body" name="body" rows="8" placeholder="Select a template above, or write a custom message…"><?= htmlspecialchars($emailTemplates['blank']['body'], ENT_QUOTES) ?></textarea>
+        </label>
+        <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1rem;">
+          <button type="submit" name="action" value="send_email" class="btn-primary">Send Email</button>
+          <button type="submit" name="action" value="no_email_needed" class="btn-secondary">No Email Needed</button>
+        </div>
+      </form>
+      <script src="/js/admin-email-compose.js" defer></script>
+
+      <h2 style="margin-top:2rem;">Communication history</h2>
+      <?php if (!$emails): ?>
+        <p style="font-size:0.8125rem; color:var(--paper-3);">No emails sent for this case yet.</p>
+      <?php endif; ?>
+      <?php foreach ($emails as $e): ?>
+        <div class="note-item">
+          <div class="note-meta">
+            <?= htmlspecialchars($e['staff_name'] ?? 'System', ENT_QUOTES) ?> · <?= htmlspecialchars($e['sender'] ?? SENDER_EMAIL, ENT_QUOTES) ?> → <?= htmlspecialchars($e['recipient'], ENT_QUOTES) ?> · <?= htmlspecialchars(fmt_time($e['sent_at']), ENT_QUOTES) ?>
+            <span class="status-pill <?= $e['delivery_status'] === 'sent' ? 'status-approved' : 'status-rejected' ?>" style="margin-left:0.5rem;"><?= htmlspecialchars(ucfirst($e['delivery_status'] ?? 'unknown'), ENT_QUOTES) ?></span>
+          </div>
+          <div class="note-body"><strong><?= htmlspecialchars($e['subject'], ENT_QUOTES) ?></strong><br><?= nl2br(htmlspecialchars($e['body'], ENT_QUOTES)) ?></div>
+        </div>
+      <?php endforeach; ?>
     </div>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

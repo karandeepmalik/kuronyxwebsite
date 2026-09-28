@@ -25,6 +25,7 @@ require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · Audit log</p>
     <h1 class="doc-title">Audit Log</h1>
+    <?php $activeAdminNav = 'audit-log'; require __DIR__ . '/../../includes/admin-nav.php'; ?>
 
     <div class="table-scroll">
     <table class="data-table">
@@ -35,7 +36,7 @@ require __DIR__ . '/../../includes/layout-header.php';
         <?php endif; ?>
         <?php foreach ($rows as $r): ?>
           <tr>
-            <td><?= htmlspecialchars($r['created_at'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars(fmt_time($r['created_at']), ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars($r['staff_name'] ?? ucfirst($r['actor_type']), ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars($r['action'], ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars($r['entity_type'], ENT_QUOTES) ?><?= $r['entity_id'] ? ' #' . (int) $r['entity_id'] : '' ?></td>

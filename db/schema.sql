@@ -8,6 +8,9 @@ CREATE TABLE staff_users (
     email         VARCHAR(190) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     role          ENUM('admin','pharmacy_staff') NOT NULL DEFAULT 'pharmacy_staff',
+    active        TINYINT(1) NOT NULL DEFAULT 1,
+    password_reset_token_hash  VARCHAR(64) NULL,
+    password_reset_expires_at  DATETIME NULL,
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -17,6 +20,16 @@ CREATE TABLE login_attempts (
     succeeded   TINYINT(1) NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_identifier_time (identifier, created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Generic rate-limit hit log (see rate_limited()/record_rate_limit_hit() in
+-- includes/auth.php) — used to throttle public, unauthenticated endpoints
+-- (intake forms, the legacy Brevo mailer endpoints) by IP.
+CREATE TABLE rate_limit_hits (
+    id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    bucket      VARCHAR(190) NOT NULL,
+    created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_bucket_time (bucket, created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE vet_applications (
@@ -61,9 +74,25 @@ CREATE TABLE vet_application_documents (
     INDEX idx_vetappdoc_app (application_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE vet_accounts (
+    id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    vet_application_id      INT UNSIGNED NOT NULL UNIQUE,
+    email                    VARCHAR(190) NOT NULL UNIQUE,
+    password_hash            VARCHAR(255) NULL,
+    status                   ENUM('pending_activation','active','suspended') NOT NULL DEFAULT 'pending_activation',
+    activation_token_hash    VARCHAR(64) NULL,
+    activation_expires_at    DATETIME NULL,
+    password_reset_token_hash VARCHAR(64) NULL,
+    password_reset_expires_at DATETIME NULL,
+    created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vetaccount_app FOREIGN KEY (vet_application_id) REFERENCES vet_applications(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE gs_requests (
     id                       INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     source                   ENUM('veterinarian','cat_owner') NOT NULL,
+    vet_account_id           INT UNSIGNED NULL,
     owner_full_name          VARCHAR(150) NOT NULL,
     owner_email              VARCHAR(190) NOT NULL,
     owner_phone              VARCHAR(30)  NOT NULL,
@@ -105,9 +134,11 @@ CREATE TABLE gs_requests (
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_gsreq_staff FOREIGN KEY (assigned_staff_id) REFERENCES staff_users(id),
+    CONSTRAINT fk_gsreq_vetaccount FOREIGN KEY (vet_account_id) REFERENCES vet_accounts(id),
     INDEX idx_gsreq_status (status),
     INDEX idx_gsreq_source (source),
-    INDEX idx_gsreq_created (created_at)
+    INDEX idx_gsreq_created (created_at),
+    INDEX idx_gsreq_vet_account (vet_account_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE gs_request_documents (
@@ -153,6 +184,7 @@ CREATE TABLE case_emails (
     gs_request_id      INT UNSIGNED NOT NULL,
     staff_id           INT UNSIGNED NULL,
     recipient          VARCHAR(190) NOT NULL,
+    sender             VARCHAR(190) NULL,
     subject            VARCHAR(255) NOT NULL,
     body               TEXT NOT NULL,
     brevo_message_id   VARCHAR(190) NULL,
@@ -185,4 +217,20 @@ CREATE TABLE audit_log (
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     INDEX idx_audit_entity (entity_type, entity_id),
     INDEX idx_audit_created (created_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- Dispatches (field notes / articles), published by staff via /admin/dispatches/.
+CREATE TABLE dispatches (
+    id               INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    title            VARCHAR(200) NOT NULL,
+    slug             VARCHAR(200) NOT NULL UNIQUE,
+    excerpt          VARCHAR(400) NULL,
+    body             TEXT NOT NULL,
+    status           ENUM('draft','published') NOT NULL DEFAULT 'draft',
+    author_staff_id  INT UNSIGNED NULL,
+    published_at     DATETIME NULL,
+    created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    CONSTRAINT fk_dispatch_author FOREIGN KEY (author_staff_id) REFERENCES staff_users(id),
+    INDEX idx_dispatch_status_published (status, published_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

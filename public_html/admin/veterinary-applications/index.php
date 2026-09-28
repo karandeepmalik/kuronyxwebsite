@@ -27,6 +27,7 @@ require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · <?= htmlspecialchars($staff['name'], ENT_QUOTES) ?></p>
     <h1 class="doc-title">Veterinary Applications</h1>
+    <?php $activeAdminNav = 'vet-applications'; require __DIR__ . '/../../includes/admin-nav.php'; ?>
 
     <form method="GET" class="filter-bar">
       <label class="field">
@@ -55,7 +56,7 @@ require __DIR__ . '/../../includes/layout-header.php';
             <td><?= htmlspecialchars($r['clinic_name'], ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars($r['registration_number'], ENT_QUOTES) ?></td>
             <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= ucwords($r['status']) ?></span></td>
-            <td><?= htmlspecialchars($r['created_at'], ENT_QUOTES) ?></td>
+            <td><?= htmlspecialchars(fmt_time($r['created_at']), ENT_QUOTES) ?></td>
           </tr>
         <?php endforeach; ?>
       </tbody>

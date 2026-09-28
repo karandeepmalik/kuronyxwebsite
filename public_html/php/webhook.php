@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/../includes/storage-path.php';
 
 // Set JSON header
 header('Content-Type: application/json');
@@ -10,12 +11,24 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit('Method not allowed');
 }
 
+// Require the shared secret configured on the webhook URL in Brevo's dashboard
+// (Settings → Webhooks → .../php/webhook.php?secret=...). Without this, anyone on
+// the internet could POST fake events here — Brevo has no other way to prove a
+// request is really from them, and this endpoint's job is to write to the contact
+// list, so an unauthenticated version of it is an open write primitive.
+if (!defined('BREVO_WEBHOOK_SECRET') || BREVO_WEBHOOK_SECRET === '' || !hash_equals(BREVO_WEBHOOK_SECRET, $_GET['secret'] ?? '')) {
+    http_response_code(403);
+    exit(json_encode(['success' => false, 'message' => 'Forbidden.']));
+}
+
 // Get raw POST payload
 $rawInput = file_get_contents('php://input');
 $input = json_decode($rawInput, true);
 
-// Log path
-$logFile = __DIR__ . '/webhook.log';
+// Logged off-webroot (alongside the private document store) rather than inside
+// public_html/php/ — a log file there was previously directly downloadable by
+// anyone, since nothing in that folder restricts direct file access.
+$logFile = private_storage_path() . '/webhook.log';
 $timestamp = date('Y-m-d H:i:s');
 
 // Prepare base log message
@@ -99,10 +112,9 @@ if ($httpCode === 201 || $httpCode === 204 || $httpCode === 200) {
     http_response_code(500);
     $logData['status'] = 'failed_api_error';
     file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    error_log('[webhook] Brevo contact upsert failed (HTTP ' . $httpCode . '): ' . $response);
     echo json_encode([
         'success' => false,
         'message' => 'Failed to create contact in Brevo.',
-        'debug' => $response,
-        'httpCode' => $httpCode
     ]);
 }

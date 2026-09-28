@@ -1,7 +1,12 @@
 <?php
-require __DIR__ . '/../../includes/db.php';
-require __DIR__ . '/../../includes/auth.php';
-require __DIR__ . '/../../includes/upload.php';
+require __DIR__ . '/../includes/db.php';
+require __DIR__ . '/../includes/auth.php';
+require __DIR__ . '/../includes/upload.php';
+
+// Must run before any HTML output so the session cookie ships with the first
+// response headers — csrf_field() alone (called later, inside the template)
+// is too late and silently breaks CSRF verification on every submission.
+csrf_token();
 
 $errors = [];
 $old    = $_POST ?? [];
@@ -9,7 +14,10 @@ $old    = $_POST ?? [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $errors['_form'] = 'Your session expired. Please review and submit the form again.';
+    } elseif (rate_limited('cat_owner_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 8, 60)) {
+        $errors['_form'] = 'Too many submissions from this connection. Please try again later.';
     } else {
+        record_rate_limit_hit('cat_owner_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
         $fields = [
             'owner_full_name' => trim($_POST['owner_full_name'] ?? ''),
             'owner_email'     => trim($_POST['owner_email'] ?? ''),
@@ -96,6 +104,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         }
 
+        if (!empty($errors) && empty($errors['_form'])) {
+            $errors['_form'] = 'Please check the highlighted fields below and try again.';
+        }
+
         if (empty($errors)) {
             $pdo = db();
             $pdo->beginTransaction();
@@ -118,6 +130,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $fields['vet_registration_info'] ?: null, $fields['requested_formulation'],
                 ]);
                 $requestId = (int) $pdo->lastInsertId();
+
+                relocate_uploaded_file($prescriptionUpload['stored_filename'], 'gs-requests/pending', "gs-requests/{$requestId}");
+                foreach ($supportingUploads as $meta) {
+                    relocate_uploaded_file($meta['stored_filename'], 'gs-requests/pending', "gs-requests/{$requestId}");
+                }
 
                 $docStmt = $pdo->prepare(
                     'INSERT INTO gs_request_documents (gs_request_id, doc_type, stored_filename, original_filename, mime_type, size_bytes)
@@ -169,7 +186,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ], 'public');
                 gs_session_start();
                 $_SESSION['gs_request_received'] = 'case';
-                header('Location: /gs-441524/request-received');
+                header('Location: /request-received');
                 exit;
             }
         }
@@ -177,13 +194,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle       = 'Submit a GS-441524 Request — Cat Owner | Kuronyx Sciences';
+$pageTitle       = 'For Cat Owners — GS-441524 Requests | Kuronyx Sciences';
 $pageDescription = 'Submit your cat\'s information and your treating veterinarian\'s prescription for GS-441524 review by Kuronyx Sciences.';
-$canonical       = 'https://kuronyx.in/gs-441524/cat-owner';
-$backHref        = '/gs-441524';
-$backLabel       = 'Back to GS-441524';
+$canonical       = 'https://kuronyx.in/for-cat-owners';
+$activeNav       = 'for-cat-owners';
 $wideWrap        = true;
-require __DIR__ . '/../../includes/layout-header.php';
+require __DIR__ . '/../includes/layout-header.php';
 
 function fc(array $errors, string $key): string {
     return 'field' . (isset($errors[$key]) ? ' has-error' : '');
@@ -192,20 +208,27 @@ function ov(array $old, string $key): string {
     return htmlspecialchars($old[$key] ?? '', ENT_QUOTES);
 }
 ?>
-    <p class="doc-eyebrow">GS-441524 · Cat owner request</p>
-    <h1 class="doc-title">Submit a GS-441524 request</h1>
+    <p class="doc-eyebrow">For cat owners / caregivers · GS-441524</p>
+    <h1 class="doc-title">GS-441524, reviewed for your cat.</h1>
     <p class="doc-meta">Kuronyx Sciences<span class="sep">·</span>No account required</p>
 
     <p class="lead">
-      Submit your cat's information along with your treating veterinarian's prescription. Our team will review the
-      prescription and information provided, and a member of the Kuronyx team will contact you by email regarding
-      the request. You do not need to create an account to submit this form.
+      GS-441524 is an antiviral compound used in veterinary medicine, most often in connection with the treatment
+      of feline infectious peritonitis (FIP), under the diagnosis and supervision of your treating veterinarian.
+      Kuronyx compounds to prescription, on a patient-by-patient basis — we do not diagnose your cat or replace
+      your veterinarian at any point.
     </p>
 
     <div class="notice">
       <span class="notice-label">Prescription required</span>
-      <p>A valid veterinary prescription is required before Kuronyx can review and process this request.</p>
+      <p>A valid veterinary prescription is required before Kuronyx can review and process this request. Dosing and treatment decisions belong solely to your treating veterinarian.</p>
     </div>
+
+    <p class="lead">
+      Submit your cat's information along with your treating veterinarian's prescription below. Our team will
+      review the prescription and information provided, and a member of the Kuronyx team will contact you by
+      email regarding the request. You do not need to create an account.
+    </p>
 
     <?php if (!empty($errors['_form'])): ?>
       <div class="alert"><?= htmlspecialchars($errors['_form'], ENT_QUOTES) ?></div>
@@ -379,4 +402,4 @@ function ov(array $old, string $key): string {
 
       <button type="submit" class="btn-primary">Submit Request</button>
     </form>
-<?php require __DIR__ . '/../../includes/layout-footer.php'; ?>
+<?php require __DIR__ . '/../includes/layout-footer.php'; ?>

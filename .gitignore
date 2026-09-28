@@ -1,4 +1,10 @@
 # Real credentials — created on the server via File Manager, never committed
 public_html/includes/db-config.php
 
+# Local dev database/storage/sessions (SQLite stand-in for MySQL) — machine-specific
+local-dev/
+
 .DS_Store
+
+# Claude Code's own local tool config (browser-preview launch command) — not a project asset
+.claude/

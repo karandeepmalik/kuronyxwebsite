@@ -2,6 +2,21 @@
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
 
+// This page creates the first admin account with no login required, so an empty
+// staff_users table alone is not enough of a gate — this URL is permanent and
+// predictable, and staff_users could in principle become empty again later.
+// SETUP_TOKEN must be set in db-config.php (a long random value, not committed)
+// and is checked before anything else runs, on both GET and POST.
+if (!defined('SETUP_TOKEN') || SETUP_TOKEN === '' || !hash_equals(SETUP_TOKEN, $_REQUEST['token'] ?? '')) {
+    http_response_code(403);
+    exit('Forbidden.');
+}
+
+// Must run before any HTML output so the session cookie ships with the first
+// response headers — csrf_field() alone (called later, inside the template)
+// is too late and silently breaks CSRF verification on every submission.
+csrf_token();
+
 $existingCount = (int) db()->query('SELECT COUNT(*) FROM staff_users')->fetchColumn();
 $errors = [];
 
@@ -67,6 +82,7 @@ require __DIR__ . '/../includes/layout-header.php';
 
     <form method="POST" novalidate>
       <?= csrf_field() ?>
+      <input type="hidden" name="token" value="<?= htmlspecialchars($_GET['token'] ?? '', ENT_QUOTES) ?>">
       <label class="field <?= isset($errors['name']) ? 'has-error' : '' ?>">
         <span class="lbl">Name</span>
         <input type="text" name="name" value="<?= htmlspecialchars($_POST['name'] ?? '', ENT_QUOTES) ?>" required>

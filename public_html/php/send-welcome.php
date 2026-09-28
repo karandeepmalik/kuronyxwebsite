@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/../includes/auth.php';
 
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -13,7 +14,8 @@ $allowedOrigins = [
     'https://www.kuronyx.in'
 ];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin)) {
+$originAllowed = in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin);
+if ($originAllowed) {
     header('Access-Control-Allow-Origin: ' . $origin);
 }
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
@@ -24,6 +26,28 @@ header('Content-Type: application/json');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
+
+// The Origin allow-list above previously only controlled whether the browser could
+// *read* the response — it never stopped the request from actually being processed.
+// A page on any other site can still fire a same-effect request the browser won't
+// preflight at all (a `fetch` with `mode:'no-cors'` and a `text/plain` Content-Type),
+// which this endpoint would happily execute since it only reads the raw body. Actually
+// rejecting requests whose Origin isn't recognized closes that off.
+if (!$originAllowed) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Origin not allowed.']);
+    exit;
+}
+
+// This sends a real transactional email to whatever address is supplied, so it's also
+// a target for abuse (email-bombing an arbitrary inbox) independent of who's allowed
+// to read the response — throttle by IP.
+if (rate_limited('send_welcome:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 5, 60)) {
+    http_response_code(429);
+    echo json_encode(['success' => false, 'message' => 'Too many requests. Please try again later.']);
+    exit;
+}
+record_rate_limit_hit('send_welcome:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
 
 // Get and validate email
 $input = json_decode(file_get_contents('php://input'), true);
@@ -90,5 +114,6 @@ if ($httpCode === 201) {
     ]);
 } else {
     http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Email could not be sent.', 'debug' => $response]);
+    error_log('[send-welcome] Brevo send failed (HTTP ' . $httpCode . '): ' . $response);
+    echo json_encode(['success' => false, 'message' => 'Email could not be sent.']);
 }

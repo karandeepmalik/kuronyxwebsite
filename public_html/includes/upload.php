@@ -1,4 +1,9 @@
 <?php
+if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
+    http_response_code(403);
+    exit('Forbidden.');
+}
+
 require_once __DIR__ . '/storage-path.php';
 
 const ALLOWED_UPLOAD_MIME = [
@@ -55,4 +60,24 @@ function store_uploaded_file(array $file, string $subfolder): array {
         'mime_type'         => $mime,
         'size_bytes'        => $file['size'],
     ];
+}
+
+// Moves a file uploaded via store_uploaded_file() out of a "pending" bucket into its
+// owning case/application's own folder, once that record's id is known (the upload
+// itself happens before the DB row exists, so it can't be filed correctly right away).
+// Failing to relocate is not fatal — download.php still falls back to the pending
+// bucket — so this only logs rather than throwing.
+function relocate_uploaded_file(string $storedFilename, string $fromSubfolder, string $toSubfolder): void {
+    $from = private_storage_path() . '/' . trim($fromSubfolder, '/') . '/' . $storedFilename;
+    $toDir = private_storage_path() . '/' . trim($toSubfolder, '/');
+    if (!is_file($from)) {
+        return;
+    }
+    if (!is_dir($toDir) && !mkdir($toDir, 0750, true) && !is_dir($toDir)) {
+        error_log("[GS-441524] Could not create storage directory {$toDir} while relocating {$storedFilename}");
+        return;
+    }
+    if (!rename($from, $toDir . '/' . $storedFilename)) {
+        error_log("[GS-441524] Could not relocate {$storedFilename} from {$fromSubfolder} to {$toSubfolder}");
+    }
 }

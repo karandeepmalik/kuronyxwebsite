@@ -28,10 +28,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([$email]);
             $staff = $stmt->fetch();
 
-            if ($staff && password_verify($password, $staff['password_hash'])) {
+            if ($staff && (int) $staff['active'] === 1 && password_verify($password, $staff['password_hash'])) {
                 record_login_attempt($identifier, true);
                 gs_session_start();
                 session_regenerate_id(true);
+                // session_regenerate_id() carries the existing $_SESSION array forward —
+                // clear any lingering vet-portal identity so one browser can't hold both
+                // a staff and a vet session at once under the shared session cookie.
+                unset($_SESSION['vet']);
                 $_SESSION['staff'] = ['id' => (int) $staff['id'], 'name' => $staff['name'], 'email' => $staff['email'], 'role' => $staff['role']];
                 audit('staff_login', 'staff_user', (int) $staff['id'], []);
                 header('Location: /admin/gs-requests/');
@@ -40,7 +44,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             record_login_attempt($identifier, false);
             audit('staff_login_failed', 'staff_user', null, ['email_attempted' => $identifier], 'public');
-            $errors['_form'] = 'Invalid email or password.';
+            $errors['_form'] = ($staff && (int) $staff['active'] !== 1)
+                ? 'This account has been deactivated. Contact an administrator.'
+                : 'Invalid email or password.';
         }
     }
 }
@@ -73,4 +79,7 @@ require __DIR__ . '/../includes/layout-header.php';
       </label>
       <button type="submit" class="btn-primary" style="margin-top:1rem;">Sign In</button>
     </form>
+    <p style="margin-top:2rem; font-size:0.8125rem; color:var(--paper-3);">
+      <a href="/admin/forgot-password.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Forgot your password?</a>
+    </p>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

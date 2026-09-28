@@ -17,24 +17,38 @@
     </url>
 
     <url>
-        <loc>https://kuronyx.in/gs-441524</loc>
-        <lastmod>2026-09-06</lastmod>
+        <loc>https://kuronyx.in/about</loc>
+        <lastmod>2026-09-10</lastmod>
+        <changefreq>monthly</changefreq>
+        <priority>0.7</priority>
+    </url>
+
+    <url>
+        <loc>https://kuronyx.in/for-veterinarians</loc>
+        <lastmod>2026-09-10</lastmod>
         <changefreq>monthly</changefreq>
         <priority>0.9</priority>
     </url>
 
     <url>
-        <loc>https://kuronyx.in/gs-441524/veterinarian</loc>
-        <lastmod>2026-09-06</lastmod>
+        <loc>https://kuronyx.in/for-cat-owners</loc>
+        <lastmod>2026-09-10</lastmod>
         <changefreq>monthly</changefreq>
+        <priority>0.9</priority>
+    </url>
+
+    <url>
+        <loc>https://kuronyx.in/dispatches</loc>
+        <lastmod>2026-09-10</lastmod>
+        <changefreq>weekly</changefreq>
         <priority>0.6</priority>
     </url>
 
     <url>
-        <loc>https://kuronyx.in/gs-441524/cat-owner</loc>
-        <lastmod>2026-09-06</lastmod>
+        <loc>https://kuronyx.in/contact-us</loc>
+        <lastmod>2026-09-10</lastmod>
         <changefreq>monthly</changefreq>
-        <priority>0.6</priority>
+        <priority>0.5</priority>
     </url>
 
 </urlset>

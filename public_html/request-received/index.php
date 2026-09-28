@@ -1,23 +1,21 @@
 <?php
-require __DIR__ . '/../../includes/auth.php';
+require __DIR__ . '/../includes/auth.php';
 gs_session_start();
 
 $kind = $_SESSION['gs_request_received'] ?? null;
 unset($_SESSION['gs_request_received']);
 
 if (!$kind) {
-    header('Location: /gs-441524');
+    header('Location: /');
     exit;
 }
 
-$pageTitle       = 'Request Received — GS-441524 | Kuronyx Sciences';
-$pageDescription = 'Your GS-441524 request has been received and will be reviewed by the Kuronyx team.';
+$pageTitle       = 'Request Received — Kuronyx Sciences';
+$pageDescription = 'Your request has been received and will be reviewed by the Kuronyx team.';
 $robotsNoindex   = true;
-$backHref        = '/gs-441524';
-$backLabel       = 'Back to GS-441524';
-require __DIR__ . '/../../includes/layout-header.php';
+require __DIR__ . '/../includes/layout-header.php';
 ?>
-    <p class="doc-eyebrow">GS-441524 · Request received</p>
+    <p class="doc-eyebrow">Request received</p>
     <h1 class="doc-title">Thank you. Your request has been received.</h1>
     <p class="doc-meta">Kuronyx Sciences<span class="sep">·</span>Under review</p>
 
@@ -40,4 +38,4 @@ require __DIR__ . '/../../includes/layout-header.php';
         Every request is reviewed individually before any formulation or pricing decision is made.
       </p>
     </div>
-<?php require __DIR__ . '/../../includes/layout-footer.php'; ?>
+<?php require __DIR__ . '/../includes/layout-footer.php'; ?>

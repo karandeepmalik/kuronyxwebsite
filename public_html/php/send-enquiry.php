@@ -1,5 +1,6 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/../includes/auth.php';
 
 // Only allow POST requests
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
@@ -13,7 +14,8 @@ $allowedOrigins = [
     'https://www.kuronyx.in'
 ];
 $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-if (in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin)) {
+$originAllowed = in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin);
+if ($originAllowed) {
     header('Access-Control-Allow-Origin: ' . $origin);
 }
 header('Access-Control-Allow-Headers: Content-Type, Authorization');
@@ -24,6 +26,22 @@ header('Content-Type: application/json');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     exit(0);
 }
+
+// See send-welcome.php for why this is checked again here rather than only gating the
+// Access-Control-Allow-Origin header: a `mode:'no-cors'` + `text/plain` fetch skips the
+// preflight entirely and this endpoint would otherwise still process it.
+if (!$originAllowed) {
+    http_response_code(403);
+    echo json_encode(['success' => false, 'message' => 'Origin not allowed.']);
+    exit;
+}
+
+if (rate_limited('send_enquiry:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 5, 60)) {
+    http_response_code(429);
+    echo json_encode(['success' => false, 'message' => 'Too many requests. Please try again later.']);
+    exit;
+}
+record_rate_limit_hit('send_enquiry:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
 
 // Get raw JSON payload
 $input = json_decode(file_get_contents('php://input'), true);
@@ -77,5 +95,6 @@ if ($httpCode === 201) {
     echo json_encode(['success' => true]);
 } else {
     http_response_code(500);
-    echo json_encode(['success' => false, 'message' => 'Enquiry could not be transmitted.', 'debug' => $response]);
+    error_log('[send-enquiry] Brevo send failed (HTTP ' . $httpCode . '): ' . $response);
+    echo json_encode(['success' => false, 'message' => 'Enquiry could not be transmitted.']);
 }
