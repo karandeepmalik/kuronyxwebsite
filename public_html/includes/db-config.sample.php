@@ -56,8 +56,8 @@ define('SENDER_NAME', 'Kuronyx Sciences');
 // verified there will fail, and mailer.php's send_transactional_email() refuses any
 // address that isn't a key in this list even if someone tampers with the form.
 define('BREVO_VERIFIED_SENDERS', [
-    'hello@kuronyx.in' => 'Kuronyx Sciences',
-    'ops@kuronyx.in'   => 'Kuronyx Sciences Ops',
+    'hello@kuronyx.in'  => 'Kuronyx Sciences',
+    'orders@kuronyx.in' => 'Kuronyx Sciences Orders',
 ]);
 
 // Set to true only in local/test environments to skip real Brevo API calls from the
