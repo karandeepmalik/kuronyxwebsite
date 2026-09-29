@@ -16,6 +16,12 @@ CREATE TABLE staff_users (
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- See schema.sql for why this exists (concurrency-safe first-admin creation).
+CREATE TABLE setup_lock (
+    id         INTEGER PRIMARY KEY DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE login_attempts (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     identifier  VARCHAR(190) NOT NULL,

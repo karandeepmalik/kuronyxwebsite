@@ -14,6 +14,16 @@ CREATE TABLE staff_users (
     created_at    DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- A single row with a fixed PRIMARY KEY value (see admin/setup.php). Claiming it via
+-- INSERT is how first-admin creation is made concurrency-safe: a PRIMARY KEY violation
+-- is always atomic and mutually exclusive at the database level, unlike a plain
+-- SELECT ... WHERE NOT EXISTS check, which doesn't take a lock that would stop two
+-- concurrent requests from both seeing an empty table and both inserting an admin.
+CREATE TABLE setup_lock (
+    id         TINYINT UNSIGNED NOT NULL PRIMARY KEY DEFAULT 1,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 CREATE TABLE login_attempts (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     identifier  VARCHAR(190) NOT NULL,

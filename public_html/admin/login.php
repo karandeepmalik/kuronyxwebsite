@@ -36,7 +36,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // clear any lingering vet-portal identity so one browser can't hold both
                 // a staff and a vet session at once under the shared session cookie.
                 unset($_SESSION['vet']);
-                $_SESSION['staff'] = ['id' => (int) $staff['id'], 'name' => $staff['name'], 'email' => $staff['email'], 'role' => $staff['role']];
+                // pw_fingerprint lets require_login() detect a password reset and boot this
+                // session even though nothing else about the identity changed — see auth.php.
+                $_SESSION['staff'] = ['id' => (int) $staff['id'], 'name' => $staff['name'], 'email' => $staff['email'], 'role' => $staff['role'], 'pw_fingerprint' => password_fingerprint($staff['password_hash'])];
                 audit('staff_login', 'staff_user', (int) $staff['id'], []);
                 header('Location: /admin/gs-requests/');
                 exit;

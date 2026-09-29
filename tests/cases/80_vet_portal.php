@@ -212,6 +212,33 @@ return function (TestEnv $env): void {
         assert_contains('/admin/login.php', $r['location'] ?? '');
     });
 
+    run_test('re-approving a suspended-but-already-activated application reactivates it directly, keeping the existing password', function () use ($env) {
+        $appId = (int) $env->scalar("SELECT id FROM vet_applications WHERE professional_email = 'portal.vet@example.test'");
+        assert_true($env->scalar('SELECT password_hash FROM vet_accounts WHERE vet_application_id = ?', [$appId]) !== null, 'sanity check: this account was activated with a real password earlier in this file');
+
+        $jarStaff = $env->cookieJarStaff;
+        $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['cookie_jar' => $jarStaff]);
+        $csrf = extract_csrf($view['body']);
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+            'cookie_jar' => $jarStaff,
+            'body' => ['csrf_token' => $csrf, 'action' => 'approve', 'note' => ''],
+        ]);
+        assert_contains('reactivated', $post['body']);
+        assert_equal('active', $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$appId]), 'an already-passworded account should go straight back to active, not pending_activation');
+
+        // The vet's ORIGINAL password (from before the suspension) should still work —
+        // reactivating must not touch password_hash, only status.
+        $jar = $env->tmpDir . '/cookies-vetportal-reactivated.txt';
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/login.php', ['cookie_jar' => $jar]);
+        $csrf2 = extract_csrf($get['body']);
+        $login = http_request('POST', $env->baseUrl . '/for-veterinarians/login.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf2, 'email' => 'portal.vet@example.test', 'password' => 'vet-portal-password-1'],
+        ]);
+        assert_equal(302, $login['status'], 'the vet should be able to sign back in with their original password, unchanged');
+        assert_contains('/for-veterinarians/portal/', $login['location'] ?? '');
+    });
+
     run_test('logging into one of staff/vet portal clears a lingering identity from the other (shared session cookie)', function () use ($env) {
         // Re-activate a fresh vet account for this check (the portal.vet one above is now
         // suspended). Uses a throwaway PDO handle that closes immediately — see the note

@@ -39,17 +39,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         if (empty($errors)) {
             // Conditioned on the token hash still matching (not just the account id) so two
             // concurrent submissions of the same link can't both succeed — whichever runs
-            // second finds 0 rows, since the first already cleared the hash.
+            // second finds 0 rows, since the first already cleared the hash. Also re-checks
+            // the linked application is still 'approved' here, not just in the SELECT above —
+            // otherwise an admin rejecting/suspending the application in the gap between this
+            // page loading and being submitted wouldn't stop the UPDATE from still activating it.
             $stmt = $pdo->prepare(
                 "UPDATE vet_accounts SET password_hash = ?, status = 'active', activation_token_hash = NULL, activation_expires_at = NULL
-                 WHERE id = ? AND activation_token_hash = ? AND status = 'pending_activation' AND activation_expires_at > ?"
+                 WHERE id = ? AND activation_token_hash = ? AND status = 'pending_activation' AND activation_expires_at > ?
+                   AND EXISTS (SELECT 1 FROM vet_applications a WHERE a.id = vet_accounts.vet_application_id AND a.status = 'approved')"
             );
             $stmt->execute([password_hash($password, PASSWORD_DEFAULT), $account['id'], hash('sha256', $rawToken), gmdate('Y-m-d H:i:s')]);
             if ($stmt->rowCount() > 0) {
                 audit('vet_account_activated', 'vet_account', (int) $account['id'], [], 'public');
                 $done = true;
             } else {
-                $account = null; // someone else already consumed this token first
+                $account = null; // someone else already consumed this token, or the application status changed underneath us
             }
         }
     }

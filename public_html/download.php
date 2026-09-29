@@ -16,18 +16,23 @@ $vet   = current_vet();
 // vice versa), so both re-checks are done here instead, matching what those functions
 // already do: a deactivated staff member's or suspended vet's still-open session
 // should stop working immediately, not just on the next portal/admin page they visit.
+// Also re-checks the password fingerprint (see auth.php) so a session issued before a
+// password reset — including one an attacker had stolen — stops working here too, the
+// same as it now does via require_login()/require_vet_login() elsewhere.
 if ($staff) {
-    $staffActive = db()->prepare('SELECT active FROM staff_users WHERE id = ?');
-    $staffActive->execute([$staff['id']]);
-    if ((int) $staffActive->fetchColumn() !== 1) {
+    $staffRow = db()->prepare('SELECT active, password_hash FROM staff_users WHERE id = ?');
+    $staffRow->execute([$staff['id']]);
+    $staffRow = $staffRow->fetch();
+    if (!$staffRow || (int) $staffRow['active'] !== 1 || !password_fingerprint_matches($staff, $staffRow['password_hash'])) {
         unset($_SESSION['staff']);
         $staff = null;
     }
 }
 if ($vet) {
-    $vetStatus = db()->prepare('SELECT status FROM vet_accounts WHERE id = ?');
-    $vetStatus->execute([$vet['id']]);
-    if ($vetStatus->fetchColumn() !== 'active') {
+    $vetRow = db()->prepare('SELECT status, password_hash FROM vet_accounts WHERE id = ?');
+    $vetRow->execute([$vet['id']]);
+    $vetRow = $vetRow->fetch();
+    if (!$vetRow || $vetRow['status'] !== 'active' || !password_fingerprint_matches($vet, $vetRow['password_hash'])) {
         unset($_SESSION['vet']);
         $vet = null;
     }

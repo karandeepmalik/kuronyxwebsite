@@ -39,7 +39,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // See admin/login.php — session_regenerate_id() carries $_SESSION forward,
                 // so clear any lingering staff identity rather than holding both at once.
                 unset($_SESSION['staff']);
-                $_SESSION['vet'] = ['id' => (int) $vet['id'], 'email' => $vet['email'], 'full_name' => $vet['full_name'], 'vet_application_id' => (int) $vet['vet_application_id']];
+                // pw_fingerprint lets require_vet_login() detect a password reset and boot
+                // this session even though nothing else about the identity changed.
+                $_SESSION['vet'] = ['id' => (int) $vet['id'], 'email' => $vet['email'], 'full_name' => $vet['full_name'], 'vet_application_id' => (int) $vet['vet_application_id'], 'pw_fingerprint' => password_fingerprint($vet['password_hash'])];
                 audit('vet_login', 'vet_account', (int) $vet['id'], [], 'public');
                 header('Location: /for-veterinarians/portal/');
                 exit;

@@ -42,11 +42,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $app['status'] = 'approved';
 
             // Provision (or reuse) the portal account this application unlocks.
-            $existing = $pdo->prepare('SELECT id FROM vet_accounts WHERE vet_application_id = ?');
+            $existing = $pdo->prepare('SELECT id, status, password_hash FROM vet_accounts WHERE vet_application_id = ?');
             $existing->execute([$id]);
-            $accountId = $existing->fetchColumn();
+            $existing = $existing->fetch();
 
-            if ($accountId === false) {
+            if ($existing === false) {
                 $emailTaken = $pdo->prepare('SELECT id FROM vet_accounts WHERE email = ?');
                 $emailTaken->execute([$app['professional_email']]);
                 if ($emailTaken->fetchColumn() !== false) {
@@ -63,6 +63,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $activationUrl = site_url() . '/for-veterinarians/activate.php?token=' . $rawToken;
                     $flash = ['type' => 'ok', 'text' => 'Application approved and a portal account has been created. Use "Send an email" below to send the activation link — nothing is emailed automatically.'];
                 }
+            } elseif ($existing['status'] === 'suspended' && $existing['password_hash'] !== null) {
+                // Was previously activated (has a real password already), then rejected or
+                // suspended — re-approving should actually restore working access, not just
+                // relabel the application while leaving the vet locked out.
+                $pdo->prepare("UPDATE vet_accounts SET status = 'active' WHERE id = ?")->execute([$existing['id']]);
+                $applyNote('Existing portal account reactivated (was suspended, already had a password)');
+                audit('vet_account_reactivated', 'vet_application', $id, []);
+                $flash = ['type' => 'ok', 'text' => 'Application approved and the existing portal account has been reactivated — the vet can sign in with their existing password.'];
+            } elseif ($existing['status'] === 'suspended') {
+                // Was rejected/suspended before ever being activated — any earlier token is
+                // long cleared/expired, so this needs a fresh one, same as a brand-new account.
+                $rawToken = bin2hex(random_bytes(32));
+                $pdo->prepare(
+                    "UPDATE vet_accounts SET status = 'pending_activation', activation_token_hash = ?, activation_expires_at = ? WHERE id = ?"
+                )->execute([hash('sha256', $rawToken), gmdate('Y-m-d H:i:s', time() + 7 * 86400), $existing['id']]);
+                $applyNote('Existing (never-activated) portal account reset back to pending activation with a fresh link');
+                audit('vet_account_reactivated', 'vet_application', $id, []);
+                $activationUrl = site_url() . '/for-veterinarians/activate.php?token=' . $rawToken;
+                $flash = ['type' => 'ok', 'text' => 'Application approved. A fresh activation link has been generated below — any previous one was invalidated when this application was rejected or suspended.'];
             } else {
                 $flash = ['type' => 'ok', 'text' => 'Application approved.'];
             }

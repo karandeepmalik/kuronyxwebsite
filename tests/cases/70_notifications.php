@@ -182,7 +182,7 @@ return function (TestEnv $env): void {
         assert_true($auditCount >= 1);
     });
 
-    run_test('a fresh activation link is refused once its application is no longer approved', function () use ($env) {
+    run_test('a fresh activation link is refused (GET) once its application is no longer approved', function () use ($env) {
         // The application from the previous test is now rejected. generate_activation_link
         // only refuses an *active* account, not a suspended one, so it will still happily
         // mint a fresh, valid, unexpired token here — activate.php's own extra check
@@ -196,8 +196,73 @@ return function (TestEnv $env): void {
             'body' => ['csrf_token' => $csrf, 'action' => 'generate_activation_link', 'note' => ''],
         ]);
         assert_true((bool) preg_match('#token=([a-f0-9]+)#', $gen['body'], $m), 'expected a fresh token even for a suspended/rejected account');
+        $env->shared['staleActivationToken'] = $m[1];
 
         $r = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $m[1]);
         assert_contains('invalid or has expired', $r['body'], 'a token for a rejected application must not work even when freshly generated and unexpired');
+    });
+
+    run_test('activation is also refused on POST if the application is rejected between loading the page and submitting it', function () use ($env) {
+        // Simulates the actual TOCTOU: an applicant loads activate.php while their
+        // application is still approved (getting a real page + CSRF token), an admin
+        // rejects the application in the meantime, then the applicant submits the form
+        // they already had open. The earlier GET-time check alone can't catch this —
+        // only re-checking inside the POST's own UPDATE does.
+        $id    = $env->shared['vetApplicationId'];
+        $token = $env->shared['staleActivationToken'];
+
+        // Put things back into the "approved, pending activation, valid token" state this
+        // scenario starts from, via direct SQL (not the review-actions UI, which would
+        // trigger reconciliation/email side effects that aren't the point of this test).
+        (function () use ($env, $id, $token) {
+            $pdo = $env->pdo();
+            $pdo->exec("UPDATE vet_applications SET status = 'approved' WHERE id = {$id}");
+            $pdo->prepare("UPDATE vet_accounts SET status = 'pending_activation', activation_token_hash = ?, activation_expires_at = ? WHERE vet_application_id = ?")
+                ->execute([hash('sha256', $token), gmdate('Y-m-d H:i:s', time() + 3600), $id]);
+        })();
+
+        // The applicant "already has this page open" — loads it while still approved.
+        $jar = $env->tmpDir . '/cookies-activate-toctou.txt';
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $token, ['cookie_jar' => $jar]);
+        assert_contains('Set a password', $get['body'], 'the page should render the real activation form while still approved');
+        $csrf = extract_csrf($get['body']);
+
+        // An admin rejects it in the meantime, without the applicant's page reloading.
+        (function () use ($env, $id) {
+            $env->pdo()->exec("UPDATE vet_applications SET status = 'rejected' WHERE id = {$id}");
+        })();
+
+        // The applicant submits the form they already had loaded.
+        $post = http_request('POST', $env->baseUrl . '/for-veterinarians/activate.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'token' => $token, 'password' => 'toctou-test-password-1', 'password_confirm' => 'toctou-test-password-1'],
+        ]);
+        assert_contains('invalid or has expired', $post['body'], 'the POST must re-check application status itself, not just trust the earlier GET');
+        assert_equal('pending_activation', $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$id]), 'the account must not have been activated');
+    });
+
+    run_test('re-approving a rejected, never-activated application resets its account to pending_activation with a fresh token', function () use ($env) {
+        // The account from the previous tests is currently 'pending_activation' with a
+        // stale token, on an application that's currently 'rejected'. Force it to the exact
+        // starting state this test is actually about: account suspended (as a real reject
+        // would leave it — see the "rejecting a vet application..." test earlier), never
+        // activated (password_hash still NULL, since nothing in this suite ever activates
+        // asha.verma's account).
+        $id = $env->shared['vetApplicationId'];
+        (function () use ($env, $id) {
+            $env->pdo()->exec("UPDATE vet_accounts SET status = 'suspended', activation_token_hash = NULL, activation_expires_at = NULL WHERE vet_application_id = {$id}");
+        })();
+        assert_true($env->scalar('SELECT password_hash FROM vet_accounts WHERE vet_application_id = ?', [$id]) === null, 'sanity check: this account should never have been activated');
+
+        $jar = $env->cookieJarStaff;
+        $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($view['body']);
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'action' => 'approve', 'note' => ''],
+        ]);
+        assert_contains('fresh activation link has been generated', $post['body']);
+        assert_equal('pending_activation', $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$id]), 'a never-activated account must be reset to pending_activation, not left suspended');
+        assert_true((bool) preg_match('#https://kuronyx\.in/for-veterinarians/activate\.php\?token=[a-f0-9]+#', $post['body']), 'the compose panel should default to the Approved template with a real, fresh link');
     });
 };

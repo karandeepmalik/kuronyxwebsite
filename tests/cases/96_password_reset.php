@@ -153,6 +153,36 @@ return function (TestEnv $env): void {
         })();
     });
 
+    run_test('a session already logged in before a reset is invalidated by it, without needing a fresh login', function () use ($env, $requestReset, $setPassword, $login) {
+        // This is the actual scenario a password reset is supposed to protect against: if
+        // someone else (or an attacker) already has a live session — say, a stolen cookie —
+        // resetting the password should kill that session immediately, not just stop it from
+        // signing in again later. A throwaway account, since this permanently changes its password.
+        (function () use ($env) {
+            $env->pdo()->prepare("INSERT INTO staff_users (name, email, password_hash, role, active) VALUES ('Session Kill Check', 'sessionkill@example.test', ?, 'pharmacy_staff', 1)")
+                ->execute([password_hash('the-original-password-1', PASSWORD_DEFAULT)]);
+        })();
+
+        $staleJar = $env->tmpDir . '/cookies-pwreset-stale-session.txt';
+        $loggedIn = $login('/admin/login.php', 'sessionkill@example.test', 'the-original-password-1', 'cookies-pwreset-stale-session');
+        assert_equal(302, $loggedIn['status']);
+        $before = http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $staleJar]);
+        assert_equal(200, $before['status'], 'the session should be valid right after logging in');
+
+        // Reset the password via a completely separate flow/jar — simulating the real
+        // account owner (or an admin) doing this from a different browser entirely, with
+        // no awareness of the stale session above.
+        $requestReset('/admin/forgot-password.php', 'sessionkill@example.test', 'cookies-pwreset-stale-request');
+        $email = $env->lastDryRunEmailTo('sessionkill@example.test');
+        preg_match('#token=([a-f0-9]+)#', $email['body'], $m);
+        $done = $setPassword('/admin/reset-password.php', $m[1], 'a-completely-new-password-2', 'a-completely-new-password-2', 'cookies-pwreset-stale-set');
+        assert_contains('Your password has been changed', $done['body']);
+
+        $after = http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $staleJar]);
+        assert_equal(302, $after['status'], 'the pre-existing session must be booted the moment the password changes, not just future logins blocked');
+        assert_contains('/admin/login.php', $after['location'] ?? '');
+    });
+
     run_test('reset emails to one address are capped so the form cannot be used to flood an inbox', function () use ($env, $requestReset, $countEmailsTo) {
         for ($i = 0; $i < 4; $i++) {
             $r = $requestReset('/admin/forgot-password.php', 'admin@example.test', "cookies-pwreset-cap-{$i}");

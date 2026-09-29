@@ -39,6 +39,23 @@ function csrf_verify(): bool {
     return !empty($_SESSION['csrf_token']) && is_string($token) && hash_equals($_SESSION['csrf_token'], $token);
 }
 
+// A fingerprint of an account's current password_hash, stored in the session at login
+// (see admin/login.php / for-veterinarians/login.php) and re-checked on every request by
+// require_login()/require_vet_login()/download.php. Since password_hash() always produces
+// a different string even for the same plaintext (random salt), this changes on every
+// successful password change — so comparing it is equivalent to a session-revocation
+// counter, without needing a schema migration to add one. It's a hash of a hash, not the
+// hash itself, so it reveals nothing useful even if a session were somehow read.
+function password_fingerprint(string $passwordHash): string {
+    return hash('sha256', $passwordHash);
+}
+
+function password_fingerprint_matches(array $sessionIdentity, ?string $currentPasswordHash): bool {
+    return $currentPasswordHash !== null
+        && isset($sessionIdentity['pw_fingerprint'])
+        && hash_equals(password_fingerprint($currentPasswordHash), $sessionIdentity['pw_fingerprint']);
+}
+
 function current_staff(): ?array {
     gs_session_start();
     return $_SESSION['staff'] ?? null;
@@ -52,9 +69,14 @@ function require_login(): array {
     }
     // Re-checked against the DB (not just the session) on every request so
     // deactivating a staff account takes effect immediately, not on next login.
-    $active = db()->prepare('SELECT active FROM staff_users WHERE id = ?');
-    $active->execute([$staff['id']]);
-    if ((int) $active->fetchColumn() !== 1) {
+    // Also re-checks the session's password fingerprint (see admin/login.php) against
+    // the current password_hash — without this, a password reset would only stop
+    // future logins; any session issued before the reset (including one an attacker
+    // had stolen) would keep working indefinitely, defeating the point of resetting it.
+    $row = db()->prepare('SELECT active, password_hash FROM staff_users WHERE id = ?');
+    $row->execute([$staff['id']]);
+    $row = $row->fetch();
+    if (!$row || (int) $row['active'] !== 1 || !password_fingerprint_matches($staff, $row['password_hash'])) {
         unset($_SESSION['staff']);
         header('Location: /admin/login.php');
         exit;
@@ -84,9 +106,10 @@ function require_vet_login(): array {
         header('Location: /for-veterinarians/login.php');
         exit;
     }
-    $status = db()->prepare('SELECT status FROM vet_accounts WHERE id = ?');
-    $status->execute([$vet['id']]);
-    if ($status->fetchColumn() !== 'active') {
+    $row = db()->prepare('SELECT status, password_hash FROM vet_accounts WHERE id = ?');
+    $row->execute([$vet['id']]);
+    $row = $row->fetch();
+    if (!$row || $row['status'] !== 'active' || !password_fingerprint_matches($vet, $row['password_hash'])) {
         unset($_SESSION['vet']);
         header('Location: /for-veterinarians/login.php');
         exit;

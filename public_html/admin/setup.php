@@ -17,10 +17,15 @@ if (!defined('SETUP_TOKEN') || SETUP_TOKEN === '' || !hash_equals(SETUP_TOKEN, $
 // is too late and silently breaks CSRF verification on every submission.
 csrf_token();
 
-$existingCount = (int) db()->query('SELECT COUNT(*) FROM staff_users')->fetchColumn();
+// setup_lock (not staff_users) is the authoritative "has setup happened" signal — see
+// the POST handler below for why. Checking it here too (not just staff_users) means this
+// message stays correct even in the edge case the file's own original comment already
+// worried about: staff_users becoming empty again later wouldn't reopen this page.
+$alreadySetUp = (int) db()->query('SELECT COUNT(*) FROM setup_lock')->fetchColumn() > 0
+    || (int) db()->query('SELECT COUNT(*) FROM staff_users')->fetchColumn() > 0;
 $errors = [];
 
-if ($existingCount > 0) {
+if ($alreadySetUp) {
     $pageTitle     = 'Setup — Kuronyx Admin';
     $robotsNoindex = true;
     $backHref      = '/admin/login.php';
@@ -51,21 +56,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($errors)) {
             $pdo = db();
-            // A separate SELECT-then-INSERT (as this used to be) leaves a window where two
-            // concurrent submissions can both see an empty table and both insert an admin.
-            // INSERT...SELECT...WHERE NOT EXISTS is a single atomic statement — only one of
-            // two concurrent submissions can find the table still empty at the moment it runs.
-            $stmt = $pdo->prepare(
-                "INSERT INTO staff_users (name, email, password_hash, role)
-                 SELECT ?, ?, ?, 'admin' WHERE NOT EXISTS (SELECT 1 FROM staff_users)"
-            );
-            $stmt->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
-            if ($stmt->rowCount() === 0) {
+            // Claiming this fixed-PRIMARY-KEY row is what actually makes this concurrency-safe:
+            // a PRIMARY KEY violation is always atomic and mutually exclusive at the database
+            // level. A plain "is staff_users empty?" check (even as one SQL statement) isn't
+            // enough — under MySQL's default non-locking reads, two concurrent requests can
+            // both see an empty table and both proceed to insert an admin.
+            try {
+                $pdo->prepare('INSERT INTO setup_lock (id) VALUES (1)')->execute();
+            } catch (PDOException $e) {
                 $errors['_form'] = 'Setup has already been completed.';
-            } else {
-                audit('staff_account_created', 'staff_user', (int) $pdo->lastInsertId(), ['via' => 'setup'], 'system');
-                header('Location: /admin/login.php?setup=done');
-                exit;
+            }
+
+            if (empty($errors)) {
+                // Belt-and-braces alongside the lock above: if an already-provisioned database
+                // was migrated to add setup_lock without also seeding it (see that migration's
+                // own comment), this stops a second admin being created regardless.
+                if ((int) $pdo->query('SELECT COUNT(*) FROM staff_users')->fetchColumn() > 0) {
+                    $errors['_form'] = 'Setup has already been completed.';
+                } else {
+                    $stmt = $pdo->prepare('INSERT INTO staff_users (name, email, password_hash, role) VALUES (?,?,?,\'admin\')');
+                    $stmt->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
+                    audit('staff_account_created', 'staff_user', (int) $pdo->lastInsertId(), ['via' => 'setup'], 'system');
+                    header('Location: /admin/login.php?setup=done');
+                    exit;
+                }
             }
         }
     }
