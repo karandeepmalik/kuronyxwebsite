@@ -42,4 +42,24 @@ return function (TestEnv $env): void {
         $r = http_request('GET', $env->baseUrl . '/dispatches/view.php?slug=does-not-exist', ['cookie_jar' => $env->tmpDir . '/cookies-disp-404.txt']);
         assert_equal(404, $r['status']);
     });
+
+    run_test('a title with a special character is not double-escaped in the <title> tag', function () use ($env) {
+        $jar = $env->cookieJarStaff;
+        $get = http_request('GET', $env->baseUrl . '/admin/dispatches/edit.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/admin/dispatches/edit.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf, 'action' => 'save',
+                'title' => 'Dosing & Storage Notes', 'slug' => '', 'excerpt' => '',
+                'body' => 'Body text.', 'status' => 'published',
+            ],
+        ]);
+        assert_contains('Dispatch created', $post['body']);
+        $slug = (string) $env->scalar("SELECT slug FROM dispatches WHERE title = 'Dosing & Storage Notes'");
+
+        $view = http_request('GET', $env->baseUrl . "/dispatches/view.php?slug={$slug}", ['cookie_jar' => $env->tmpDir . '/cookies-disp-title.txt']);
+        assert_contains('<title>Dosing &amp; Storage Notes', $view['body']);
+        assert_true(strpos($view['body'], '&amp;amp;') === false, 'the title should be escaped exactly once, not twice');
+    });
 };

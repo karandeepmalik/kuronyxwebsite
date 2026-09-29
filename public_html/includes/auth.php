@@ -128,6 +128,14 @@ function rate_limited(string $bucket, int $maxHits, int $windowMinutes): bool {
 
 function record_rate_limit_hit(string $bucket): void {
     db()->prepare('INSERT INTO rate_limit_hits (bucket) VALUES (?)')->execute([$bucket]);
+    // Nothing ever deleted old rows before this, so the table grew forever even though
+    // rate_limited() only ever looks at the last 60 minutes. Opportunistic cleanup (~1 in
+    // 50 calls, so this doesn't add a DELETE to every single request) keeps it bounded.
+    // 24h is comfortably past the longest window checked anywhere in this app.
+    if (random_int(1, 50) === 1) {
+        $cutoff = gmdate('Y-m-d H:i:s', time() - 86400);
+        db()->prepare('DELETE FROM rate_limit_hits WHERE created_at < ?')->execute([$cutoff]);
+    }
 }
 
 // --- Self-service password reset (staff/admin via staff_users, vets via vet_accounts) ---
@@ -171,11 +179,21 @@ function find_password_reset_account(string $table, string $rawToken): ?array {
     return $stmt->fetch() ?: null;
 }
 
-// Sets the new password and burns the token so a link can only ever be used once.
-function complete_password_reset(string $table, int $id, string $newPassword): void {
-    password_reset_condition($table);
-    db()->prepare("UPDATE {$table} SET password_hash = ?, password_reset_token_hash = NULL, password_reset_expires_at = NULL WHERE id = ?")
-        ->execute([password_hash($newPassword, PASSWORD_DEFAULT), $id]);
+// Sets the new password and burns the token so a link can only ever be used once. The
+// WHERE clause re-checks the token hash/expiry as part of the same atomic UPDATE rather
+// than trusting an earlier, separate find_password_reset_account() call — otherwise two
+// concurrent submissions of the same link could both pass that earlier check and both
+// succeed. Whichever UPDATE actually runs first wins (rowCount() 1); the second finds
+// 0 matching rows, since the first already cleared the hash. Returns whether this call
+// was the one that won.
+function complete_password_reset(string $table, int $id, string $rawToken, string $newPassword): bool {
+    $cond = password_reset_condition($table);
+    $stmt = db()->prepare(
+        "UPDATE {$table} SET password_hash = ?, password_reset_token_hash = NULL, password_reset_expires_at = NULL
+         WHERE id = ? AND password_reset_token_hash = ? AND password_reset_expires_at > ? AND {$cond}"
+    );
+    $stmt->execute([password_hash($newPassword, PASSWORD_DEFAULT), $id, hash('sha256', $rawToken), gmdate('Y-m-d H:i:s')]);
+    return $stmt->rowCount() > 0;
 }
 
 // Records an entry in audit_log. Never pass prescription/document contents as $metadata.

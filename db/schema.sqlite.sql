@@ -58,6 +58,14 @@ CREATE TABLE vet_applications (
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column
+-- default — without this trigger, updated_at would freeze at insert time forever
+-- in local dev/tests, unlike production.
+CREATE TRIGGER trg_vet_applications_updated_at AFTER UPDATE ON vet_applications
+BEGIN
+    UPDATE vet_applications SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 CREATE INDEX idx_vetapp_status ON vet_applications (status);
 
 CREATE TABLE vet_application_documents (
@@ -84,6 +92,14 @@ CREATE TABLE vet_accounts (
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column
+-- default — without this trigger, updated_at would freeze at insert time forever
+-- in local dev/tests, unlike production.
+CREATE TRIGGER trg_vet_accounts_updated_at AFTER UPDATE ON vet_accounts
+BEGIN
+    UPDATE vet_accounts SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 
 CREATE TABLE gs_requests (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -130,6 +146,14 @@ CREATE TABLE gs_requests (
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column
+-- default — without this trigger, updated_at would freeze at insert time forever
+-- in local dev/tests, unlike production.
+CREATE TRIGGER trg_gs_requests_updated_at AFTER UPDATE ON gs_requests
+BEGIN
+    UPDATE gs_requests SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 CREATE INDEX idx_gsreq_status ON gs_requests (status);
 CREATE INDEX idx_gsreq_source ON gs_requests (source);
 CREATE INDEX idx_gsreq_created ON gs_requests (created_at);
@@ -216,4 +240,12 @@ CREATE TABLE dispatches (
     created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column
+-- default — without this trigger, updated_at would freeze at insert time forever
+-- in local dev/tests, unlike production.
+CREATE TRIGGER trg_dispatches_updated_at AFTER UPDATE ON dispatches
+BEGIN
+    UPDATE dispatches SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+END;
 CREATE INDEX idx_dispatch_status_published ON dispatches (status, published_at);

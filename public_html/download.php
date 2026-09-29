@@ -10,11 +10,21 @@ require __DIR__ . '/includes/storage-path.php';
 // those are staff-only, reviewed as part of the account application itself).
 $staff = current_staff();
 $vet   = current_vet();
+// Neither current_staff() nor current_vet() re-checks the account is still active —
+// unlike require_login()/require_vet_login(), they only read the session. This page
+// can't just call those (require_login() would wrongly redirect a signed-in vet, and
+// vice versa), so both re-checks are done here instead, matching what those functions
+// already do: a deactivated staff member's or suspended vet's still-open session
+// should stop working immediately, not just on the next portal/admin page they visit.
+if ($staff) {
+    $staffActive = db()->prepare('SELECT active FROM staff_users WHERE id = ?');
+    $staffActive->execute([$staff['id']]);
+    if ((int) $staffActive->fetchColumn() !== 1) {
+        unset($_SESSION['staff']);
+        $staff = null;
+    }
+}
 if ($vet) {
-    // current_vet() only reads the session — unlike require_vet_login(), it doesn't
-    // re-check the account is still active, so a suspended vet's still-open session
-    // could otherwise keep downloading their own documents. Re-check here too, since
-    // this page never calls require_vet_login() (that would wrongly redirect staff).
     $vetStatus = db()->prepare('SELECT status FROM vet_accounts WHERE id = ?');
     $vetStatus->execute([$vet['id']]);
     if ($vetStatus->fetchColumn() !== 'active') {

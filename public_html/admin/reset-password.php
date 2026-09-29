@@ -19,11 +19,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
-            complete_password_reset('staff_users', (int) $account['id'], $password);
-            // A locked-out user resetting their password should be able to sign in straight away.
-            db()->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute([strtolower($account['email'])]);
-            audit('password_reset_completed', 'staff_user', (int) $account['id'], [], 'public');
-            $done = true;
+            if (complete_password_reset('staff_users', (int) $account['id'], $rawToken, $password)) {
+                // A locked-out user resetting their password should be able to sign in straight away.
+                db()->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute([strtolower($account['email'])]);
+                audit('password_reset_completed', 'staff_user', (int) $account['id'], [], 'public');
+                $done = true;
+            } else {
+                $account = null; // someone else already used this link first
+            }
         }
     }
 }

@@ -19,10 +19,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
-            complete_password_reset('vet_accounts', (int) $account['id'], $password);
-            db()->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute(['vet:' . strtolower($account['email'])]);
-            audit('password_reset_completed', 'vet_account', (int) $account['id'], [], 'public');
-            $done = true;
+            if (complete_password_reset('vet_accounts', (int) $account['id'], $rawToken, $password)) {
+                db()->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute(['vet:' . strtolower($account['email'])]);
+                audit('password_reset_completed', 'vet_account', (int) $account['id'], [], 'public');
+                $done = true;
+            } else {
+                $account = null; // someone else already used this link first
+            }
         }
     }
 }

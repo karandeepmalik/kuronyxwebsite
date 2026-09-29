@@ -23,4 +23,35 @@ return function (TestEnv $env): void {
         $r = http_request('GET', $env->baseUrl . '/download.php?kind=gs_request&doc_id=999999', ['cookie_jar' => $env->cookieJarStaff]);
         assert_equal(404, $r['status']);
     });
+
+    run_test('a deactivated staff member cannot keep downloading on a still-live session', function () use ($env) {
+        // download.php uses current_staff(), which — unlike require_login() — only reads
+        // the session and never re-checks `active` against the DB. Without its own explicit
+        // re-check, a deactivated staff member's still-open session would keep working here
+        // even though every other admin page would already be booting them out.
+        (function () use ($env) {
+            $env->pdo()->prepare("INSERT INTO staff_users (name, email, password_hash, role, active) VALUES ('Download Check', 'downloadcheck@example.test', ?, 'pharmacy_staff', 1)")
+                ->execute([password_hash('a-download-check-password-1', PASSWORD_DEFAULT)]);
+        })();
+
+        $jar = $env->tmpDir . '/cookies-dl-deactivated.txt';
+        $get = http_request('GET', $env->baseUrl . '/admin/login.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        http_request('POST', $env->baseUrl . '/admin/login.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'email' => 'downloadcheck@example.test', 'password' => 'a-download-check-password-1'],
+        ]);
+
+        $docId = (int) $env->pdo()->query('SELECT id FROM gs_request_documents ORDER BY id ASC LIMIT 1')->fetchColumn();
+        $before = http_request('GET', $env->baseUrl . "/download.php?kind=gs_request&doc_id={$docId}", ['cookie_jar' => $jar]);
+        assert_equal(200, $before['status'], 'session should be valid right after login');
+
+        (function () use ($env) {
+            $env->pdo()->exec("UPDATE staff_users SET active = 0 WHERE email = 'downloadcheck@example.test'");
+        })();
+
+        $after = http_request('GET', $env->baseUrl . "/download.php?kind=gs_request&doc_id={$docId}", ['cookie_jar' => $jar]);
+        assert_equal(302, $after['status'], 'download.php must re-check active status itself, the same as require_login() does elsewhere');
+        assert_contains('/admin/login.php', $after['location'] ?? '');
+    });
 };

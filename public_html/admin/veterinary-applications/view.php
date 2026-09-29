@@ -68,6 +68,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } elseif ($action === 'reject') {
             $pdo->prepare('UPDATE vet_applications SET status = \'rejected\', reviewed_by = ?, reviewed_at = ? WHERE id = ?')->execute([$staff['id'], gmdate('Y-m-d H:i:s'), $id]);
+            // An application can be rejected after already being approved (e.g. a decision
+            // gets reversed) — without this, a previously-provisioned vet_accounts row would
+            // stay active/pending_activation and the vet could still sign in or activate
+            // despite the application now showing rejected. Same statement 'suspend' below
+            // already uses, and it's safe to run unconditionally even if no account exists.
+            $pdo->prepare('UPDATE vet_accounts SET status = \'suspended\' WHERE vet_application_id = ?')->execute([$id]);
             $applyNote('Rejected');
             audit('application_rejected', 'vet_application', $id, []);
             $flash = ['type' => 'ok', 'text' => 'Application rejected. Use "Send an email" below if the applicant needs to be told.'];

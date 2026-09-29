@@ -26,7 +26,7 @@ if (!$article) {
     exit;
 }
 
-$pageTitle       = htmlspecialchars($article['title'], ENT_QUOTES) . ' — Kuronyx Dispatches';
+$pageTitle       = $article['title'] . ' — Kuronyx Dispatches';
 $pageDescription = $article['excerpt'] ?: ('Field notes from Kuronyx Sciences: ' . $article['title']);
 $canonical       = 'https://kuronyx.in/dispatches/view.php?slug=' . urlencode($article['slug']);
 $activeNav       = 'dispatches';

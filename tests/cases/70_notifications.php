@@ -164,6 +164,11 @@ return function (TestEnv $env): void {
         ]);
         assert_contains('Application rejected', $post['body']);
         assert_true(strpos($post['body'], 'notified by email') === false);
+        assert_equal(
+            'suspended',
+            $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$id]),
+            'rejecting an application must also lock out any portal account it had already provisioned'
+        );
 
         $csrf2 = extract_csrf($post['body']);
         $noEmail = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
@@ -175,5 +180,24 @@ return function (TestEnv $env): void {
 
         $auditCount = (int) $env->scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'email_not_needed' AND entity_type = 'vet_application' AND entity_id = ?", [$id]);
         assert_true($auditCount >= 1);
+    });
+
+    run_test('a fresh activation link is refused once its application is no longer approved', function () use ($env) {
+        // The application from the previous test is now rejected. generate_activation_link
+        // only refuses an *active* account, not a suspended one, so it will still happily
+        // mint a fresh, valid, unexpired token here — activate.php's own extra check
+        // (requiring the linked application to still be 'approved') is what has to catch this.
+        $id  = $env->shared['vetApplicationId'];
+        $jar = $env->cookieJarStaff;
+        $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($view['body']);
+        $gen = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'action' => 'generate_activation_link', 'note' => ''],
+        ]);
+        assert_true((bool) preg_match('#token=([a-f0-9]+)#', $gen['body'], $m), 'expected a fresh token even for a suspended/rejected account');
+
+        $r = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $m[1]);
+        assert_contains('invalid or has expired', $r['body'], 'a token for a rejected application must not work even when freshly generated and unexpired');
     });
 };

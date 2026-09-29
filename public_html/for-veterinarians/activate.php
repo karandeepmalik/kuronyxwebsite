@@ -9,12 +9,18 @@ $rawToken = trim($_GET['token'] ?? $_POST['token'] ?? '');
 $errors = [];
 $done = false;
 
+// Also requires the underlying application to still be 'approved' — belt-and-braces
+// against any future code path that changes an application's status without also
+// updating its linked vet_accounts row (see admin/veterinary-applications/view.php's
+// 'reject' action, which now does this explicitly, but this check doesn't depend on
+// every such path remembering to).
 $account = null;
 if ($rawToken !== '') {
     $stmt = $pdo->prepare(
         "SELECT va.*, a.full_name FROM vet_accounts va
          JOIN vet_applications a ON a.id = va.vet_application_id
-         WHERE va.activation_token_hash = ? AND va.status = 'pending_activation' AND va.activation_expires_at > ?
+         WHERE va.activation_token_hash = ? AND va.status = 'pending_activation'
+           AND va.activation_expires_at > ? AND a.status = 'approved'
          LIMIT 1"
     );
     $stmt->execute([hash('sha256', $rawToken), gmdate('Y-m-d H:i:s')]);
@@ -31,10 +37,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
-            $pdo->prepare("UPDATE vet_accounts SET password_hash = ?, status = 'active', activation_token_hash = NULL, activation_expires_at = NULL WHERE id = ?")
-                ->execute([password_hash($password, PASSWORD_DEFAULT), $account['id']]);
-            audit('vet_account_activated', 'vet_account', (int) $account['id'], [], 'public');
-            $done = true;
+            // Conditioned on the token hash still matching (not just the account id) so two
+            // concurrent submissions of the same link can't both succeed — whichever runs
+            // second finds 0 rows, since the first already cleared the hash.
+            $stmt = $pdo->prepare(
+                "UPDATE vet_accounts SET password_hash = ?, status = 'active', activation_token_hash = NULL, activation_expires_at = NULL
+                 WHERE id = ? AND activation_token_hash = ? AND status = 'pending_activation' AND activation_expires_at > ?"
+            );
+            $stmt->execute([password_hash($password, PASSWORD_DEFAULT), $account['id'], hash('sha256', $rawToken), gmdate('Y-m-d H:i:s')]);
+            if ($stmt->rowCount() > 0) {
+                audit('vet_account_activated', 'vet_account', (int) $account['id'], [], 'public');
+                $done = true;
+            } else {
+                $account = null; // someone else already consumed this token first
+            }
         }
     }
 }

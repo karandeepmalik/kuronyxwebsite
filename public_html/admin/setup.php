@@ -51,13 +51,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($errors)) {
             $pdo = db();
-            // Re-check under the same request to avoid a race between two setup submissions.
-            $count = (int) $pdo->query('SELECT COUNT(*) FROM staff_users')->fetchColumn();
-            if ($count > 0) {
+            // A separate SELECT-then-INSERT (as this used to be) leaves a window where two
+            // concurrent submissions can both see an empty table and both insert an admin.
+            // INSERT...SELECT...WHERE NOT EXISTS is a single atomic statement — only one of
+            // two concurrent submissions can find the table still empty at the moment it runs.
+            $stmt = $pdo->prepare(
+                "INSERT INTO staff_users (name, email, password_hash, role)
+                 SELECT ?, ?, ?, 'admin' WHERE NOT EXISTS (SELECT 1 FROM staff_users)"
+            );
+            $stmt->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
+            if ($stmt->rowCount() === 0) {
                 $errors['_form'] = 'Setup has already been completed.';
             } else {
-                $stmt = $pdo->prepare('INSERT INTO staff_users (name, email, password_hash, role) VALUES (?,?,?,\'admin\')');
-                $stmt->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT)]);
                 audit('staff_account_created', 'staff_user', (int) $pdo->lastInsertId(), ['via' => 'setup'], 'system');
                 header('Location: /admin/login.php?setup=done');
                 exit;
