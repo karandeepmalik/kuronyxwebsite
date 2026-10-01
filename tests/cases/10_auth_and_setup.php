@@ -74,6 +74,43 @@ return function (TestEnv $env): void {
         assert_contains('Too many failed attempts', $post['body']);
     });
 
+    run_test('begin_serialized_window_transaction() actually serializes concurrent writers, not just two autocommit statements', function () use ($env) {
+        // The point of wrapping the lockout/rate-limit count-then-insert in a transaction
+        // is that a second writer physically cannot interleave with it — proving that
+        // needs two genuinely separate DB connections (the HTTP test server is a single
+        // php -S process handling one request at a time anyway, so driving this through
+        // HTTP requests would prove nothing about the locking itself). This opens two raw
+        // PDO connections to the same test database and shows that a second connection
+        // cannot begin its own serialized window transaction while the first still holds
+        // one open — only once it commits/rolls back can the second proceed. MySQL's
+        // locking-read (FOR UPDATE / gap lock) equivalent for production isn't exercised
+        // here since this suite only runs against SQLite, but the same function is used
+        // for both; this is a regression test for the locking primitive itself, not for
+        // a specific caller.
+        require_once $env->root . '/public_html/includes/auth.php';
+
+        $connA = new PDO('sqlite:' . $env->dbPath);
+        $connB = new PDO('sqlite:' . $env->dbPath);
+        $connB->exec('PRAGMA busy_timeout = 200');
+
+        begin_serialized_window_transaction($connA);
+        $blocked = false;
+        try {
+            begin_serialized_window_transaction($connB);
+            $connB->exec('ROLLBACK');
+        } catch (Throwable $e) {
+            $blocked = true;
+        }
+        assert_true($blocked, 'a second connection must not be able to start its own write transaction while the first still holds one open');
+
+        $connA->exec('ROLLBACK');
+
+        // Once A releases the lock, B must be able to proceed normally — this isn't
+        // permanently wedged, just serialized.
+        begin_serialized_window_transaction($connB);
+        $connB->exec('ROLLBACK');
+    });
+
     run_test('login with a forged csrf token is rejected', function () use ($env) {
         $jar = $env->tmpDir . '/cookies-csrf.txt';
         http_request('GET', $env->baseUrl . '/admin/login.php', ['cookie_jar' => $jar]);

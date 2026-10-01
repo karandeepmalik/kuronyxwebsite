@@ -19,14 +19,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $emailOld = $email;
         $identifier = 'vet:' . strtolower($email);
 
+        // reserve_login_attempt() atomically checks the lockout count and reserves this
+        // attempt as a failure in one transaction — see auth.php. A plain is_locked_out()
+        // pre-check followed by a separate reserve/record call would let concurrent
+        // requests all pass the check before any of them had recorded anything.
+        $attemptId = ($email === '' || $password === '') ? null : reserve_login_attempt($identifier);
+
         if ($email === '' || $password === '') {
             $errors['_form'] = 'Enter your email and password.';
-        } elseif (is_locked_out($identifier)) {
+        } elseif ($attemptId === null) {
             $errors['_form'] = 'Too many failed attempts. Please try again in ' . LOGIN_LOCKOUT_MINUTES . ' minutes.';
         } else {
-            // Reserved as a failure before the (slow) password check runs, then flipped to
-            // success below if it is one — see reserve_login_attempt() in auth.php.
-            $attemptId = reserve_login_attempt($identifier);
             $stmt = db()->prepare(
                 "SELECT va.*, a.full_name FROM vet_accounts va
                  JOIN vet_applications a ON a.id = va.vet_application_id

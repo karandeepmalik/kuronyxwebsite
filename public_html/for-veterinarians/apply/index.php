@@ -72,6 +72,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
             } catch (UploadException $e) {
+                // A later document (e.g. the third of three) can fail validation after an
+                // earlier one was already written to the pending bucket — clean those up
+                // too, or they're orphaned forever since $errors being non-empty means the
+                // DB transaction below (which would otherwise relocate or reference them)
+                // never runs.
+                foreach ($uploads as $meta) {
+                    delete_uploaded_file($meta['stored_filename'], 'vet-applications/pending');
+                }
                 $errors['_form'] = $e->getMessage();
             }
         }

@@ -103,6 +103,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
             } catch (UploadException $e) {
+                // A later file (e.g. a second supporting document) can fail validation
+                // after an earlier one (the prescription, or the first supporting doc) was
+                // already written to the pending bucket — clean those up too, or they're
+                // orphaned forever since $errors being non-empty means the DB transaction
+                // below (which would otherwise relocate or reference them) never runs.
+                foreach (array_merge($prescriptionUpload ? [$prescriptionUpload] : [], $supportingUploads) as $meta) {
+                    delete_uploaded_file($meta['stored_filename'], 'gs-requests/pending');
+                }
                 $errors['_form'] = $e->getMessage();
             }
         }

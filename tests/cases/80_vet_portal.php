@@ -152,6 +152,42 @@ return function (TestEnv $env): void {
         assert_true($row === false, 'no row should have been stored for a request with an invalid date of birth');
     });
 
+    run_test('the vet portal cleans up an already-stored prescription when a later supporting upload fails validation', function () use ($env) {
+        // Same orphaned-upload bug as the cat-owner and vet-apply forms (same shared
+        // UploadException catch block shape): the prescription (a valid PNG) is stored
+        // successfully, then the loop moves on to supporting_1 (a .txt file) and
+        // store_uploaded_file() rejects it on mime type. That used to leave the
+        // already-stored prescription orphaned in gs-requests/pending forever, since
+        // $errors being non-empty means the DB transaction that would otherwise
+        // relocate/reference it never runs.
+        $pngPath = __DIR__ . '/../fixtures/tiny.png';
+        $txtPath = __DIR__ . '/../fixtures/invalid.txt';
+        $pendingDir = $env->storageDir . '/gs-requests/pending';
+        $before = is_dir($pendingDir) ? array_values(array_diff(scandir($pendingDir), ['.', '..'])) : [];
+
+        $jar = $env->shared['vetPortalJar'];
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf,
+                'owner_full_name' => 'Orphan Portal Client', 'owner_email' => 'orphanportal@example.test', 'owner_phone' => '9111111113',
+                'owner_address' => '7 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
+                'patient_name' => 'Orphan', 'requested_formulation' => 'oral', 'consent' => '1',
+                'prescription' => new CURLFile($pngPath, 'image/png', 'prescription.png'),
+                'supporting_1' => new CURLFile($txtPath, 'text/plain', 'not-an-image.txt'),
+            ],
+        ]);
+        assert_contains('Unsupported file type', $post['body']);
+
+        $after = is_dir($pendingDir) ? array_values(array_diff(scandir($pendingDir), ['.', '..'])) : [];
+        assert_equal($before, $after, 'the successfully-stored prescription must have been cleaned up, not left behind in the pending bucket');
+
+        $row = $env->pdo()->query("SELECT * FROM gs_requests WHERE owner_email = 'orphanportal@example.test'")->fetch();
+        assert_true($row === false, 'no row should have been stored for a request with a failed upload');
+    });
+
     run_test('the vet can submit a GS-441524 request from the portal with a prescription attached', function () use ($env) {
         $jar = $env->shared['vetPortalJar'];
         $pngPath = __DIR__ . '/../fixtures/tiny.png';

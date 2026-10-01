@@ -120,39 +120,69 @@ function require_vet_login(): array {
 const LOGIN_MAX_ATTEMPTS      = 8;
 const LOGIN_LOCKOUT_MINUTES   = 15;
 
-function is_locked_out(string $identifier): bool {
-    // Compute the cutoff in PHP and bind it as a plain value rather than relying on
-    // MySQL-specific date arithmetic (NOW()/INTERVAL) — keeps this portable and avoids
-    // a dialect-specific query failing outright on another engine.
-    $cutoff = gmdate('Y-m-d H:i:s', time() - LOGIN_LOCKOUT_MINUTES * 60);
-    $stmt = db()->prepare(
-        'SELECT COUNT(*) FROM login_attempts
-         WHERE identifier = ? AND succeeded = 0 AND created_at > ?'
-    );
-    $stmt->execute([$identifier, $cutoff]);
-    return (int) $stmt->fetchColumn() >= LOGIN_MAX_ATTEMPTS;
+function db_driver(): string {
+    return defined('DB_DRIVER') ? DB_DRIVER : 'mysql';
 }
 
-// Records this attempt and returns its row id, so a caller that doesn't yet know the
-// outcome (see reserve_login_attempt() below) can flip it to successful afterward.
-function record_login_attempt(string $identifier, bool $succeeded): int {
-    $stmt = db()->prepare('INSERT INTO login_attempts (identifier, succeeded) VALUES (?, ?)');
-    $stmt->execute([$identifier, $succeeded ? 1 : 0]);
-    return (int) db()->lastInsertId();
+// Starts a transaction that actually serializes concurrent callers racing the same
+// count-then-insert window, instead of leaving the SELECT and the INSERT as two
+// independent autocommit statements a concurrent request can interleave with.
+// - SQLite only ever allows one writer for the *whole database* at a time once a write
+//   transaction is open. Issuing "BEGIN IMMEDIATE" (rather than PDO's own
+//   beginTransaction(), which starts SQLite's default *deferred* transaction — no lock
+//   until the first write) takes that write lock immediately, before the SELECT below
+//   even runs, so every statement until COMMIT is serialized against every other writer.
+// - MySQL/InnoDB has no database-wide write lock, so the SELECT in the caller must use
+//   "FOR UPDATE" on the same (identifier/bucket, created_at) range the INSERT lands in.
+//   Under InnoDB's default REPEATABLE READ isolation, a locking read on an indexed range
+//   takes a *gap lock* over that range even when nothing currently matches it — so a
+//   concurrent transaction's own locking read for the same identifier/bucket blocks until
+//   this one commits or rolls back, instead of reading a stale pre-insert count.
+// Raw SQL (not PDO's beginTransaction()/commit()/rollBack()) is used throughout so this
+// never gets silently downgraded to a plain "BEGIN" by the PDO SQLite driver. Callers of
+// this (reserve_login_attempt(), rate_limited()) must not themselves be called from
+// inside another open transaction — none of this app's call sites do that today.
+function begin_serialized_window_transaction(PDO $pdo): void {
+    $pdo->exec(db_driver() === 'sqlite' ? 'BEGIN IMMEDIATE' : 'START TRANSACTION');
 }
 
-// Reserves this attempt as a failure *before* the (slow, bcrypt-based) password check
-// runs, rather than only recording it afterward. is_locked_out() only ever looks at
-// already-recorded attempts, so if recording only happened after verifying the password,
-// a burst of concurrent login requests could all pass the lockout check before any of
-// them had recorded anything — each one individually fast to check, but all queued up
-// behind the same ~100ms bcrypt call, giving an attacker many more guesses per window
-// than LOGIN_MAX_ATTEMPTS. Reserving first closes that window to the (much smaller) time
-// it takes to insert a row, not the time it takes to verify a password. Call
-// mark_login_attempt_succeeded() with the returned id once the password check comes back
-// true, so a successful login doesn't end up counted as one of the account's failures.
-function reserve_login_attempt(string $identifier): int {
-    return record_login_attempt($identifier, false);
+// Appends "FOR UPDATE" on MySQL only — SQLite doesn't support the clause at all (and
+// doesn't need it: begin_serialized_window_transaction() already serializes it there).
+function locking_read_suffix(): string {
+    return db_driver() === 'sqlite' ? '' : ' FOR UPDATE';
+}
+
+// Atomically checks whether $identifier is currently locked out and, if not, reserves
+// this attempt as a failure — both inside one serialized transaction (see
+// begin_serialized_window_transaction()), so the count-then-insert can't be interleaved
+// by a concurrent request the way two separate statements could be. Returns null when
+// locked out (nothing reserved); otherwise the new login_attempts row id, which the
+// caller must pass to mark_login_attempt_succeeded() if the password check then succeeds
+// — reserving as a failure *before* running the slow, bcrypt-based password check (rather
+// than only recording afterward) keeps the window a concurrent burst could race through
+// down to this one DB round trip, not the time it takes to verify a password.
+function reserve_login_attempt(string $identifier): ?int {
+    $pdo = db();
+    begin_serialized_window_transaction($pdo);
+    try {
+        $cutoff = gmdate('Y-m-d H:i:s', time() - LOGIN_LOCKOUT_MINUTES * 60);
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM login_attempts WHERE identifier = ? AND succeeded = 0 AND created_at > ?'
+            . locking_read_suffix()
+        );
+        $stmt->execute([$identifier, $cutoff]);
+        if ((int) $stmt->fetchColumn() >= LOGIN_MAX_ATTEMPTS) {
+            $pdo->exec('COMMIT');
+            return null;
+        }
+        $pdo->prepare('INSERT INTO login_attempts (identifier, succeeded) VALUES (?, 0)')->execute([$identifier]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->exec('COMMIT');
+        return $id;
+    } catch (Throwable $e) {
+        $pdo->exec('ROLLBACK');
+        throw $e;
+    }
 }
 
 function mark_login_attempt_succeeded(int $attemptId): void {
@@ -161,30 +191,38 @@ function mark_login_attempt_succeeded(int $attemptId): void {
 
 // Generic per-bucket rate limiter (e.g. bucket = "cat_owner_submit:1.2.3.4") for public,
 // unauthenticated endpoints that would otherwise let a script flood storage, the DB, or
-// (for the Brevo-calling endpoints) someone else's inbox with no real limit. Same shape
-// as the login-attempts lockout above, generalized to any caller.
-//
-// Records this attempt and reports whether it pushes the bucket over the limit, as one
-// call. This used to be two separate functions — rate_limited() to check, then (only if
-// the caller decided to proceed) record_rate_limit_hit() to record — which let concurrent
-// requests all pass the check before any of them had recorded a hit, so a burst could
-// blow straight through maxHits. Recording unconditionally, before the count is read,
-// means every attempt (including ones that end up rejected) is always included in its own
-// count and closes that window.
+// (for the Brevo-calling endpoints) someone else's inbox with no real limit. Same shape,
+// and the same atomic count-then-insert transaction, as the login lockout above.
 function rate_limited(string $bucket, int $maxHits, int $windowMinutes): bool {
-    db()->prepare('INSERT INTO rate_limit_hits (bucket) VALUES (?)')->execute([$bucket]);
-    // Nothing ever deleted old rows before this, so the table grew forever even though
-    // the count below only ever looks at the last $windowMinutes. Opportunistic cleanup
-    // (~1 in 50 calls, so this doesn't add a DELETE to every single request) keeps it
-    // bounded. 24h is comfortably past the longest window checked anywhere in this app.
-    if (random_int(1, 50) === 1) {
-        $cutoff = gmdate('Y-m-d H:i:s', time() - 86400);
-        db()->prepare('DELETE FROM rate_limit_hits WHERE created_at < ?')->execute([$cutoff]);
+    $pdo = db();
+    begin_serialized_window_transaction($pdo);
+    try {
+        $cutoff = gmdate('Y-m-d H:i:s', time() - $windowMinutes * 60);
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ? AND created_at > ?' . locking_read_suffix()
+        );
+        $stmt->execute([$bucket, $cutoff]);
+        $exceeded = (int) $stmt->fetchColumn() >= $maxHits;
+
+        // Recorded regardless of outcome, including a blocked attempt, so retrying
+        // immediately after being blocked can't reset the bucket.
+        $pdo->prepare('INSERT INTO rate_limit_hits (bucket) VALUES (?)')->execute([$bucket]);
+
+        // Nothing ever deleted old rows before this, so the table grew forever even though
+        // the count above only ever looks at the last $windowMinutes. Opportunistic
+        // cleanup (~1 in 50 calls, so this doesn't add a DELETE to every single request)
+        // keeps it bounded. 24h is comfortably past the longest window checked anywhere in
+        // this app.
+        if (random_int(1, 50) === 1) {
+            $oldCutoff = gmdate('Y-m-d H:i:s', time() - 86400);
+            $pdo->prepare('DELETE FROM rate_limit_hits WHERE created_at < ?')->execute([$oldCutoff]);
+        }
+        $pdo->exec('COMMIT');
+        return $exceeded;
+    } catch (Throwable $e) {
+        $pdo->exec('ROLLBACK');
+        throw $e;
     }
-    $cutoff = gmdate('Y-m-d H:i:s', time() - $windowMinutes * 60);
-    $stmt = db()->prepare('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ? AND created_at > ?');
-    $stmt->execute([$bucket, $cutoff]);
-    return (int) $stmt->fetchColumn() > $maxHits;
 }
 
 // --- Self-service password reset (staff/admin via staff_users, vets via vet_accounts) ---
