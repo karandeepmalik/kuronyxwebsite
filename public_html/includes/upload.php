@@ -81,3 +81,15 @@ function relocate_uploaded_file(string $storedFilename, string $fromSubfolder, s
         error_log("[GS-441524] Could not relocate {$storedFilename} from {$fromSubfolder} to {$toSubfolder}");
     }
 }
+
+// Deletes a file previously written by store_uploaded_file(), used to clean up uploads
+// that already landed on disk when the DB transaction meant to reference them then fails
+// and rolls back — otherwise the file is orphaned on disk forever with nothing in the DB
+// pointing to it. Silently no-ops if the file isn't at that path (it may already have been
+// relocated, or never existed), so callers can try every plausible location unconditionally.
+function delete_uploaded_file(string $storedFilename, string $subfolder): void {
+    $path = private_storage_path() . '/' . trim($subfolder, '/') . '/' . $storedFilename;
+    if (is_file($path) && !unlink($path)) {
+        error_log("[GS-441524] Could not delete orphaned upload {$path}");
+    }
+}

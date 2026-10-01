@@ -23,14 +23,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (rate_limited($ipBucket, 15, 60)) {
             $errors['_form'] = 'Too many requests from this connection. Please try again later.';
         } else {
-            record_rate_limit_hit($ipBucket);
-
             // Also capped per address so this can't be used to flood someone's inbox with
             // reset emails. The visitor sees the same confirmation either way — whether an
             // account exists, is inactive, or was throttled is never revealed.
             $emailBucket = 'pw_reset_email:staff:' . substr(strtolower($email), 0, 150);
             if ($email !== '' && !rate_limited($emailBucket, 3, 60)) {
-                record_rate_limit_hit($emailBucket);
                 $stmt = db()->prepare('SELECT id, name, email FROM staff_users WHERE email = ? AND active = 1 LIMIT 1');
                 $stmt->execute([$email]);
                 $account = $stmt->fetch();

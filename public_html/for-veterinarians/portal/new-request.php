@@ -56,7 +56,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $dob = null;
         if ($fields['patient_dob'] !== '') {
             $d = DateTime::createFromFormat('Y-m-d', $fields['patient_dob']);
-            if ($d && $d <= new DateTime()) {
+            // createFromFormat() silently rolls invalid calendar dates over to the next
+            // valid one (e.g. "2026-02-30" becomes March 2) instead of failing, so a
+            // mismatch between the input and the round-tripped output is the only way to
+            // catch that — $d alone being truthy isn't enough.
+            if ($d && $d->format('Y-m-d') === $fields['patient_dob'] && $d <= new DateTime()) {
                 $dob = $fields['patient_dob'];
             } else {
                 $errors['patient_dob'] = 'Enter a valid date';
@@ -143,6 +147,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
             } catch (Throwable $e) {
                 $pdo->rollBack();
+                // The uploaded file(s) already landed on disk before this transaction ran —
+                // rolling back the DB rows without also removing them would leave them
+                // orphaned forever. relocate_uploaded_file() may or may not have run yet
+                // depending on where the failure happened, so check both the pending bucket
+                // and the per-request folder for each file.
+                foreach (array_merge([$prescriptionUpload], $supportingUploads) as $meta) {
+                    if (!$meta) continue;
+                    delete_uploaded_file($meta['stored_filename'], 'gs-requests/pending');
+                    if (isset($requestId)) {
+                        delete_uploaded_file($meta['stored_filename'], "gs-requests/{$requestId}");
+                    }
+                }
                 $errors['_form'] = 'Something went wrong submitting your request. Please try again.';
             }
 

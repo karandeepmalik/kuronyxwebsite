@@ -119,8 +119,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $account = $account->fetch();
             if (!$account) {
                 $flash = ['type' => 'err', 'text' => 'No portal account exists for this application yet — approve it first.'];
+            } elseif ($app['status'] !== 'approved') {
+                // activate.php independently requires the linked application to still be
+                // 'approved', so a link minted while the application is rejected/suspended
+                // can never work even though this would otherwise happily hand staff a URL
+                // that looks usable. Block it at the source instead of relying on the vet
+                // account's own status alone (which 'approve' may not have touched yet).
+                $flash = ['type' => 'err', 'text' => 'This application is not currently approved — no working activation link can be generated.'];
             } elseif ($account['status'] === 'active') {
                 $flash = ['type' => 'err', 'text' => 'This vet has already activated their account — no link needed.'];
+            } elseif ($account['status'] !== 'pending_activation') {
+                $flash = ['type' => 'err', 'text' => 'This portal account is not awaiting activation — resolve its status first.'];
             } else {
                 $rawToken = bin2hex(random_bytes(32));
                 $pdo->prepare('UPDATE vet_accounts SET activation_token_hash = ?, activation_expires_at = ? WHERE id = ?')

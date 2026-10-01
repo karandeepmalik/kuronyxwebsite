@@ -18,7 +18,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif (rate_limited('vet_apply_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 8, 60)) {
         $errors['_form'] = 'Too many submissions from this connection. Please try again later.';
     } else {
-        record_rate_limit_hit('vet_apply_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
         $fields = [
             'full_name'            => trim($_POST['full_name'] ?? ''),
             'professional_email'   => trim($_POST['professional_email'] ?? ''),
@@ -122,6 +121,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
             } catch (Throwable $e) {
                 $pdo->rollBack();
+                // The uploaded file(s) already landed on disk before this transaction ran —
+                // rolling back the DB rows without also removing them would leave them
+                // orphaned forever. relocate_uploaded_file() may or may not have run yet
+                // depending on where the failure happened, so check both the pending bucket
+                // and the per-application folder for each file.
+                foreach ($uploads as $meta) {
+                    delete_uploaded_file($meta['stored_filename'], 'vet-applications/pending');
+                    if (isset($applicationId)) {
+                        delete_uploaded_file($meta['stored_filename'], "vet-applications/{$applicationId}");
+                    }
+                }
                 $errors['_form'] = 'Something went wrong submitting your application. Please try again.';
             }
 

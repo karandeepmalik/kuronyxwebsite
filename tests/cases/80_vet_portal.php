@@ -125,6 +125,33 @@ return function (TestEnv $env): void {
         assert_contains('Please check the highlighted fields', $post['body']);
     });
 
+    run_test('the vet portal also rejects a calendar-invalid date of birth instead of silently rolling it over', function () use ($env) {
+        // Same bug as the cat-owner form (both share this exact validation block):
+        // DateTime::createFromFormat('Y-m-d', ...) rolls an invalid calendar date like
+        // "2026-02-30" over to the next valid one instead of failing, so a naive truthy
+        // check let it through and stored the wrong date.
+        $jar = $env->shared['vetPortalJar'];
+        $pngPath = __DIR__ . '/../fixtures/tiny.png';
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf,
+                'owner_full_name' => 'Bad Date Client', 'owner_email' => 'baddateclient@example.test', 'owner_phone' => '9111111112',
+                'owner_address' => '6 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
+                'patient_name' => 'Rollover', 'patient_dob' => '2026-02-30', 'requested_formulation' => 'oral', 'consent' => '1',
+                'prescription' => new CURLFile($pngPath, 'image/png', 'prescription.png'),
+            ],
+        ]);
+        assert_equal(200, $post['status']);
+        assert_contains('has-error', $post['body']);
+        assert_contains('Please check the highlighted fields', $post['body']);
+
+        $row = $env->pdo()->query("SELECT * FROM gs_requests WHERE owner_email = 'baddateclient@example.test'")->fetch();
+        assert_true($row === false, 'no row should have been stored for a request with an invalid date of birth');
+    });
+
     run_test('the vet can submit a GS-441524 request from the portal with a prescription attached', function () use ($env) {
         $jar = $env->shared['vetPortalJar'];
         $pngPath = __DIR__ . '/../fixtures/tiny.png';

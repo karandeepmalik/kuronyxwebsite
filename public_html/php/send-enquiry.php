@@ -41,8 +41,6 @@ if (rate_limited('send_enquiry:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 5, 60
     echo json_encode(['success' => false, 'message' => 'Too many requests. Please try again later.']);
     exit;
 }
-record_rate_limit_hit('send_enquiry:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
-
 // Get raw JSON payload
 $input = json_decode(file_get_contents('php://input'), true);
 

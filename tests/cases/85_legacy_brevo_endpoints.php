@@ -120,4 +120,29 @@ return function (TestEnv $env): void {
         $last = $exhaustRateLimit($env, 'vet_apply_submit:127.0.0.1', '/for-veterinarians/apply/index.php', $csrf, $jar);
         assert_contains('Too many submissions', $last['body']);
     });
+
+    run_test('a blocked (rate-limited) request still records its own hit', function () use ($env) {
+        // rate_limited() used to be a check-then-act split: the caller only called
+        // record_rate_limit_hit() in the success branch, so a request that got blocked
+        // never added a row — meaning a burst of concurrent requests could all read the
+        // count before any of them recorded a hit, and all slip through. The fix records
+        // every attempt unconditionally, including ones that end up rejected, so a bucket
+        // that has just rejected a request should show maxHits + 1 rows, not maxHits.
+        $bucket = 'cat_owner_submit:127.0.0.1';
+        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
+
+        $jar = $env->tmpDir . '/cookies-ratelimit-hitcount.txt';
+        $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        for ($i = 0; $i < 8; $i++) {
+            http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
+        }
+        $blocked = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
+        assert_contains('Too many submissions', $blocked['body']);
+
+        $hits = (int) $env->scalar('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ?', [$bucket]);
+        assert_equal(9, $hits, 'the blocked 9th attempt should itself have been recorded, not skipped');
+
+        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
+    });
 };

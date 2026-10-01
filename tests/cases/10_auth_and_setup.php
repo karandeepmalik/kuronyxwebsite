@@ -98,5 +98,18 @@ return function (TestEnv $env): void {
         $home = http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar]);
         assert_equal(200, $home['status']);
         assert_contains('GS-441524 Requests', $home['body']);
+
+        // record_login_attempt() is now reserved as a failure *before* the password check
+        // runs (so a burst of concurrent attempts can't all pass is_locked_out() before any
+        // of them are recorded — see auth.php), then flipped to succeeded on a correct
+        // login. The "login rejects a wrong password" test above already left one failed
+        // row for this identifier — this successful login must add exactly one more row,
+        // flipped to succeeded, not a leftover succeeded=0 placeholder plus a separate row.
+        $stmt = $env->pdo()->prepare('SELECT succeeded FROM login_attempts WHERE identifier = ? ORDER BY id');
+        $stmt->execute(['admin@example.test']);
+        $rows = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        assert_equal(2, count($rows), 'expected one earlier failed attempt plus this successful one');
+        assert_equal(0, (int) $rows[0], 'the earlier wrong-password attempt should still show as failed');
+        assert_equal(1, (int) $rows[1], 'the reserved attempt for this login should have been flipped to succeeded');
     });
 };

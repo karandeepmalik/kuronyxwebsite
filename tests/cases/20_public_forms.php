@@ -72,6 +72,34 @@ return function (TestEnv $env): void {
         assert_contains('Please check the highlighted fields', $post['body']);
     });
 
+    run_test('cat owner request rejects a calendar-invalid date of birth instead of silently rolling it over', function () use ($env, $pngPath) {
+        // DateTime::createFromFormat('Y-m-d', ...) doesn't fail on an invalid calendar date
+        // like "2026-02-30" — it silently rolls over to the next valid one (March 2) instead,
+        // so a naive truthy check on the result let bad dates through and stored the wrong
+        // value. This must now be rejected, not rolled over and saved.
+        $jar = $env->tmpDir . '/cookies-catowner-baddob.txt';
+        $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf,
+                'owner_full_name' => 'Bad Date Owner', 'owner_email' => 'baddate@example.test', 'owner_phone' => '9998887772',
+                'owner_address' => '3 Test Street', 'owner_city' => 'Delhi', 'owner_state' => 'Delhi', 'owner_pin' => '110001',
+                'patient_name' => 'Rollover', 'patient_dob' => '2026-02-30',
+                'vet_name' => 'Dr. Rao', 'vet_clinic' => 'Rao Clinic', 'vet_email' => 'rao2@example.test', 'vet_phone' => '9123456782',
+                'requested_formulation' => 'oral', 'consent' => '1',
+                'prescription' => new CURLFile($pngPath, 'image/png', 'prescription.png'),
+            ],
+        ]);
+        assert_equal(200, $post['status']);
+        assert_contains('has-error', $post['body']);
+        assert_contains('Please check the highlighted fields', $post['body']);
+
+        $row = $env->pdo()->query("SELECT * FROM gs_requests WHERE owner_email = 'baddate@example.test'")->fetch();
+        assert_true($row === false, 'no row should have been stored for a request with an invalid date of birth');
+    });
+
     run_test('cat owner request succeeds with a prescription upload', function () use ($env, $pngPath) {
         $jar = $env->tmpDir . '/cookies-catowner-ok.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);

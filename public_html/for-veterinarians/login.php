@@ -24,6 +24,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (is_locked_out($identifier)) {
             $errors['_form'] = 'Too many failed attempts. Please try again in ' . LOGIN_LOCKOUT_MINUTES . ' minutes.';
         } else {
+            // Reserved as a failure before the (slow) password check runs, then flipped to
+            // success below if it is one — see reserve_login_attempt() in auth.php.
+            $attemptId = reserve_login_attempt($identifier);
             $stmt = db()->prepare(
                 "SELECT va.*, a.full_name FROM vet_accounts va
                  JOIN vet_applications a ON a.id = va.vet_application_id
@@ -33,7 +36,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $vet = $stmt->fetch();
 
             if ($vet && $vet['status'] === 'active' && $vet['password_hash'] && password_verify($password, $vet['password_hash'])) {
-                record_login_attempt($identifier, true);
+                mark_login_attempt_succeeded($attemptId);
                 gs_session_start();
                 session_regenerate_id(true);
                 // See admin/login.php — session_regenerate_id() carries $_SESSION forward,
@@ -47,7 +50,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            record_login_attempt($identifier, false);
             audit('vet_login_failed', 'vet_account', null, ['email_attempted' => $identifier], 'public');
             $errors['_form'] = ($vet && $vet['status'] === 'pending_activation')
                 ? 'This account has not been activated yet — check your email for the activation link.'

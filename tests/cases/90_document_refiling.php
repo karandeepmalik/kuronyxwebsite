@@ -77,4 +77,31 @@ return function (TestEnv $env): void {
         $dl = http_request('GET', $env->baseUrl . "/download.php?kind=gs_request&doc_id={$docId}", ['cookie_jar' => $jar]);
         assert_equal(200, $dl['status'], 'the relocated file should still be downloadable');
     });
+
+    run_test('delete_uploaded_file() removes an orphaned upload and no-ops when the file is absent', function () use ($env) {
+        // Submission failures used to leave store_uploaded_file()'s output on disk forever
+        // when the DB transaction that was meant to reference it then rolled back — nothing
+        // ever deleted it. The fix added delete_uploaded_file() and wired it into every
+        // intake form's catch block. Triggering a genuine mid-transaction DB failure
+        // through the public forms isn't reliably portable across MySQL/SQLite without
+        // relying on engine-specific quirks, so this tests the cleanup helper itself
+        // directly: it must remove a file that's actually there, and safely no-op for a
+        // subfolder the file was never relocated to (the two locations every catch block
+        // checks, since relocate_uploaded_file() may or may not have already run).
+        require_once $env->root . '/public_html/includes/storage-path.php';
+        require_once $env->root . '/public_html/includes/upload.php';
+
+        $subfolder = 'gs-requests/pending';
+        $dir = $env->storageDir . '/' . $subfolder;
+        if (!is_dir($dir)) mkdir($dir, 0750, true);
+        $filename = 'orphan-test-' . bin2hex(random_bytes(8)) . '.png';
+        file_put_contents($dir . '/' . $filename, 'not a real image, just a cleanup test fixture');
+        assert_true(is_file($dir . '/' . $filename), 'fixture file should exist before cleanup');
+
+        delete_uploaded_file($filename, 'gs-requests/does-not-exist');
+        assert_true(is_file($dir . '/' . $filename), 'deleting from a subfolder the file is not in must not touch it');
+
+        delete_uploaded_file($filename, $subfolder);
+        assert_true(!is_file($dir . '/' . $filename), 'the orphaned upload should now be removed');
+    });
 };

@@ -182,11 +182,11 @@ return function (TestEnv $env): void {
         assert_true($auditCount >= 1);
     });
 
-    run_test('a fresh activation link is refused (GET) once its application is no longer approved', function () use ($env) {
-        // The application from the previous test is now rejected. generate_activation_link
-        // only refuses an *active* account, not a suspended one, so it will still happily
-        // mint a fresh, valid, unexpired token here — activate.php's own extra check
-        // (requiring the linked application to still be 'approved') is what has to catch this.
+    run_test('generate_activation_link refuses to mint a token once its application is no longer approved', function () use ($env) {
+        // The application from the previous test is now rejected. Minting a token here
+        // would produce a link that looks usable but can never work — activate.php also
+        // requires the linked application to still be 'approved' — so this is now refused
+        // at the source instead of relying on activate.php to quietly swallow a dead link.
         $id  = $env->shared['vetApplicationId'];
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
@@ -195,11 +195,8 @@ return function (TestEnv $env): void {
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'generate_activation_link', 'note' => ''],
         ]);
-        assert_true((bool) preg_match('#token=([a-f0-9]+)#', $gen['body'], $m), 'expected a fresh token even for a suspended/rejected account');
-        $env->shared['staleActivationToken'] = $m[1];
-
-        $r = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $m[1]);
-        assert_contains('invalid or has expired', $r['body'], 'a token for a rejected application must not work even when freshly generated and unexpired');
+        assert_contains('not currently approved', $gen['body']);
+        assert_true(!preg_match('#token=[a-f0-9]+#', $gen['body']), 'no activation link should be generated for a non-approved application');
     });
 
     run_test('activation is also refused on POST if the application is rejected between loading the page and submitting it', function () use ($env) {
@@ -207,13 +204,13 @@ return function (TestEnv $env): void {
         // application is still approved (getting a real page + CSRF token), an admin
         // rejects the application in the meantime, then the applicant submits the form
         // they already had open. The earlier GET-time check alone can't catch this —
-        // only re-checking inside the POST's own UPDATE does.
+        // only re-checking inside the POST's own UPDATE does. This test sets up its own
+        // "approved, pending activation, valid token" state directly via SQL — not via
+        // generate_activation_link, which now correctly refuses to mint a token here —
+        // so this scenario can still be exercised independently of that action.
         $id    = $env->shared['vetApplicationId'];
-        $token = $env->shared['staleActivationToken'];
+        $token = bin2hex(random_bytes(32));
 
-        // Put things back into the "approved, pending activation, valid token" state this
-        // scenario starts from, via direct SQL (not the review-actions UI, which would
-        // trigger reconciliation/email side effects that aren't the point of this test).
         (function () use ($env, $id, $token) {
             $pdo = $env->pdo();
             $pdo->exec("UPDATE vet_applications SET status = 'approved' WHERE id = {$id}");

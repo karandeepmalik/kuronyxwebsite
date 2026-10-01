@@ -23,15 +23,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (rate_limited($ipBucket, 15, 60)) {
             $errors['_form'] = 'Too many requests from this connection. Please try again later.';
         } else {
-            record_rate_limit_hit($ipBucket);
-
             // See admin/forgot-password.php — same per-address cap and the same
             // always-identical confirmation, so nothing here reveals which emails have accounts.
             // Only activated (status = active) accounts get a reset; a pending one still
             // needs its original activation link, and a suspended one must stay locked out.
             $emailBucket = 'pw_reset_email:vet:' . substr(strtolower($email), 0, 150);
             if ($email !== '' && !rate_limited($emailBucket, 3, 60)) {
-                record_rate_limit_hit($emailBucket);
                 $stmt = db()->prepare(
                     "SELECT va.id, va.email, a.full_name FROM vet_accounts va
                      JOIN vet_applications a ON a.id = va.vet_application_id

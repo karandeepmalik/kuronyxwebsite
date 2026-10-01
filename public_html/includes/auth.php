@@ -133,32 +133,58 @@ function is_locked_out(string $identifier): bool {
     return (int) $stmt->fetchColumn() >= LOGIN_MAX_ATTEMPTS;
 }
 
-function record_login_attempt(string $identifier, bool $succeeded): void {
+// Records this attempt and returns its row id, so a caller that doesn't yet know the
+// outcome (see reserve_login_attempt() below) can flip it to successful afterward.
+function record_login_attempt(string $identifier, bool $succeeded): int {
     $stmt = db()->prepare('INSERT INTO login_attempts (identifier, succeeded) VALUES (?, ?)');
     $stmt->execute([$identifier, $succeeded ? 1 : 0]);
+    return (int) db()->lastInsertId();
+}
+
+// Reserves this attempt as a failure *before* the (slow, bcrypt-based) password check
+// runs, rather than only recording it afterward. is_locked_out() only ever looks at
+// already-recorded attempts, so if recording only happened after verifying the password,
+// a burst of concurrent login requests could all pass the lockout check before any of
+// them had recorded anything — each one individually fast to check, but all queued up
+// behind the same ~100ms bcrypt call, giving an attacker many more guesses per window
+// than LOGIN_MAX_ATTEMPTS. Reserving first closes that window to the (much smaller) time
+// it takes to insert a row, not the time it takes to verify a password. Call
+// mark_login_attempt_succeeded() with the returned id once the password check comes back
+// true, so a successful login doesn't end up counted as one of the account's failures.
+function reserve_login_attempt(string $identifier): int {
+    return record_login_attempt($identifier, false);
+}
+
+function mark_login_attempt_succeeded(int $attemptId): void {
+    db()->prepare('UPDATE login_attempts SET succeeded = 1 WHERE id = ?')->execute([$attemptId]);
 }
 
 // Generic per-bucket rate limiter (e.g. bucket = "cat_owner_submit:1.2.3.4") for public,
 // unauthenticated endpoints that would otherwise let a script flood storage, the DB, or
 // (for the Brevo-calling endpoints) someone else's inbox with no real limit. Same shape
 // as the login-attempts lockout above, generalized to any caller.
+//
+// Records this attempt and reports whether it pushes the bucket over the limit, as one
+// call. This used to be two separate functions — rate_limited() to check, then (only if
+// the caller decided to proceed) record_rate_limit_hit() to record — which let concurrent
+// requests all pass the check before any of them had recorded a hit, so a burst could
+// blow straight through maxHits. Recording unconditionally, before the count is read,
+// means every attempt (including ones that end up rejected) is always included in its own
+// count and closes that window.
 function rate_limited(string $bucket, int $maxHits, int $windowMinutes): bool {
-    $cutoff = gmdate('Y-m-d H:i:s', time() - $windowMinutes * 60);
-    $stmt = db()->prepare('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ? AND created_at > ?');
-    $stmt->execute([$bucket, $cutoff]);
-    return (int) $stmt->fetchColumn() >= $maxHits;
-}
-
-function record_rate_limit_hit(string $bucket): void {
     db()->prepare('INSERT INTO rate_limit_hits (bucket) VALUES (?)')->execute([$bucket]);
     // Nothing ever deleted old rows before this, so the table grew forever even though
-    // rate_limited() only ever looks at the last 60 minutes. Opportunistic cleanup (~1 in
-    // 50 calls, so this doesn't add a DELETE to every single request) keeps it bounded.
-    // 24h is comfortably past the longest window checked anywhere in this app.
+    // the count below only ever looks at the last $windowMinutes. Opportunistic cleanup
+    // (~1 in 50 calls, so this doesn't add a DELETE to every single request) keeps it
+    // bounded. 24h is comfortably past the longest window checked anywhere in this app.
     if (random_int(1, 50) === 1) {
         $cutoff = gmdate('Y-m-d H:i:s', time() - 86400);
         db()->prepare('DELETE FROM rate_limit_hits WHERE created_at < ?')->execute([$cutoff]);
     }
+    $cutoff = gmdate('Y-m-d H:i:s', time() - $windowMinutes * 60);
+    $stmt = db()->prepare('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ? AND created_at > ?');
+    $stmt->execute([$bucket, $cutoff]);
+    return (int) $stmt->fetchColumn() > $maxHits;
 }
 
 // --- Self-service password reset (staff/admin via staff_users, vets via vet_accounts) ---

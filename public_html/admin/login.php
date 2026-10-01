@@ -24,12 +24,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif (is_locked_out($identifier)) {
             $errors['_form'] = 'Too many failed attempts. Please try again in ' . LOGIN_LOCKOUT_MINUTES . ' minutes.';
         } else {
+            // Reserved as a failure before the (slow) password check runs, then flipped to
+            // success below if it is one — see reserve_login_attempt() in auth.php.
+            $attemptId = reserve_login_attempt($identifier);
             $stmt = db()->prepare('SELECT * FROM staff_users WHERE email = ? LIMIT 1');
             $stmt->execute([$email]);
             $staff = $stmt->fetch();
 
             if ($staff && (int) $staff['active'] === 1 && password_verify($password, $staff['password_hash'])) {
-                record_login_attempt($identifier, true);
+                mark_login_attempt_succeeded($attemptId);
                 gs_session_start();
                 session_regenerate_id(true);
                 // session_regenerate_id() carries the existing $_SESSION array forward —
@@ -44,7 +47,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            record_login_attempt($identifier, false);
             audit('staff_login_failed', 'staff_user', null, ['email_attempted' => $identifier], 'public');
             $errors['_form'] = ($staff && (int) $staff['active'] !== 1)
                 ? 'This account has been deactivated. Contact an administrator.'
