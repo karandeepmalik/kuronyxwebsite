@@ -17,6 +17,12 @@ if (!$case) {
 
 $statuses = ['submitted','under_review','awaiting_information','communication_in_progress','formulation_discussion','approved','compounding','ready_for_dispatch','dispatched','finished','closed','cancelled','rejected'];
 $flash = null;
+// What staff typed into the email composer, kept when a send fails validation (or fails to
+// go out) so the form re-renders with their draft instead of wiping it back to the blank template.
+$draft = null;
+// Column limit for free-text notes (TEXT = 65,535 bytes; 10,000 chars stays under that even at
+// 4 bytes/char). Over it MySQL throws and the visitor sees a bare 500.
+const NOTE_MAX_CHARS = 10000;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
@@ -27,27 +33,52 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'change_status') {
             $newStatus = $_POST['new_status'] ?? '';
             $note      = trim($_POST['status_note'] ?? '');
+            $expectedLockVersion = (int) ($_POST['expected_lock_version'] ?? -1);
             if (!in_array($newStatus, $statuses, true)) {
                 $flash = ['type' => 'err', 'text' => 'Invalid status.'];
+            } elseif (mb_strlen($note) > NOTE_MAX_CHARS) {
+                $flash = ['type' => 'err', 'text' => 'The status note is too long (max ' . NOTE_MAX_CHARS . ' characters).'];
             } else {
-                $pdo->beginTransaction();
-                try {
-                    $pdo->prepare('UPDATE gs_requests SET status = ? WHERE id = ?')->execute([$newStatus, $id]);
+                $flash = run_serialized_transaction($pdo, function (PDO $pdo) use ($id, $newStatus, $note, $staff, $expectedLockVersion, &$case) {
+                    // Re-reads status (for the history row's previous_status) and
+                    // lock_version from inside the transaction, not the $case snapshot
+                    // taken at the top of the script — two concurrent status changes on the
+                    // same case would otherwise both compute "from" against the same stale
+                    // value, recording a wrong previous_status in history for whichever
+                    // commits second (and, without the lock_version check below, that
+                    // second one would also just silently overwrite the first's change — a
+                    // double-click has exactly this shape too).
+                    $current = $pdo->prepare(
+                        'SELECT status, lock_version FROM gs_requests WHERE id = ?' . locking_read_suffix()
+                    );
+                    $current->execute([$id]);
+                    $current = $current->fetch();
+                    if (!$current) {
+                        return ['type' => 'err', 'text' => 'Case not found.'];
+                    }
+                    if ((int) $current['lock_version'] !== $expectedLockVersion) {
+                        return ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
+                    }
+
+                    $pdo->prepare('UPDATE gs_requests SET status = ?, lock_version = lock_version + 1 WHERE id = ?')->execute([$newStatus, $id]);
                     $pdo->prepare('INSERT INTO case_status_history (gs_request_id, previous_status, new_status, changed_by, note) VALUES (?,?,?,?,?)')
-                        ->execute([$id, $case['status'], $newStatus, $staff['id'], $note ?: null]);
-                    $pdo->commit();
-                    audit('case_status_changed', 'gs_request', $id, ['from' => $case['status'], 'to' => $newStatus]);
-                    $flash = ['type' => 'ok', 'text' => 'Status updated. Nothing is emailed automatically — use "Send an email" below if the owner needs to be told.'];
+                        ->execute([$id, $current['status'], $newStatus, $staff['id'], $note ?: null]);
+                    // Audited *inside* the transaction, before it commits — auditing
+                    // afterward meant that if audit()'s own INSERT ever failed, the catch
+                    // block's rollBack() would itself throw ("no active transaction",
+                    // since the status change had already committed by then), surfacing as
+                    // an opaque 500 for a change that had actually succeeded.
+                    audit('case_status_changed', 'gs_request', $id, ['from' => $current['status'], 'to' => $newStatus]);
                     $case['status'] = $newStatus;
-                } catch (Throwable $e) {
-                    $pdo->rollBack();
-                    $flash = ['type' => 'err', 'text' => 'Could not update status.'];
-                }
+                    return ['type' => 'ok', 'text' => 'Status updated. Nothing is emailed automatically — use "Send an email" below if the owner needs to be told.'];
+                });
             }
         } elseif ($action === 'add_note') {
             $content = trim($_POST['content'] ?? '');
             if ($content === '') {
                 $flash = ['type' => 'err', 'text' => 'Note cannot be empty.'];
+            } elseif (mb_strlen($content) > NOTE_MAX_CHARS) {
+                $flash = ['type' => 'err', 'text' => 'The note is too long (max ' . NOTE_MAX_CHARS . ' characters).'];
             } else {
                 $pdo->prepare('INSERT INTO case_internal_notes (gs_request_id, staff_id, content) VALUES (?,?,?)')
                     ->execute([$id, $staff['id'], $content]);
@@ -59,25 +90,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'final_formulation'   => trim($_POST['final_formulation'] ?? '') ?: null,
                 'final_concentration' => trim($_POST['final_concentration'] ?? '') ?: null,
                 'final_quantity'      => trim($_POST['final_quantity'] ?? '') ?: null,
-                'final_price'         => ($_POST['final_price'] ?? '') !== '' ? (float) $_POST['final_price'] : null,
+                'final_price'         => trim($_POST['final_price'] ?? '') !== '' ? (float) $_POST['final_price'] : null,
                 'courier'             => trim($_POST['courier'] ?? '') ?: null,
                 'tracking_number'     => trim($_POST['tracking_number'] ?? '') ?: null,
                 'dispatch_date'       => trim($_POST['dispatch_date'] ?? '') ?: null,
                 'closure_reason'      => trim($_POST['closure_reason'] ?? '') ?: null,
             ];
-            $pdo->prepare(
+            // Validated before touching the DB — previously a non-numeric price silently became
+            // 0, a negative or absurdly large one reached a DECIMAL(10,2) column (a 500, or
+            // INF for 1e999), and an invalid dispatch_date or over-long text field threw from
+            // the UPDATE itself, losing everything else typed into this form.
+            $finalError = null;
+            $rawPrice = trim($_POST['final_price'] ?? '');
+            if ($rawPrice !== '') {
+                if (!is_numeric($rawPrice) || (float) $rawPrice < 0 || (float) $rawPrice > 99999999.99) {
+                    $finalError = 'Price must be a number between 0 and 99,999,999.99.';
+                }
+            }
+            if ($finalError === null && $final['dispatch_date'] !== null) {
+                $dd = DateTime::createFromFormat('Y-m-d', $final['dispatch_date']);
+                if (!$dd || $dd->format('Y-m-d') !== $final['dispatch_date']) {
+                    $finalError = 'Dispatch date must be a valid date.';
+                }
+            }
+            if ($finalError === null && field_length_errors($final, [
+                'final_formulation' => 100, 'final_concentration' => 100, 'final_quantity' => 100,
+                'courier' => 100, 'tracking_number' => 100, 'closure_reason' => 20000,
+            ])) {
+                $finalError = 'One of the fields is too long.';
+            }
+            // closure_reason is a TEXT column: 65,535 bytes, which fewer than 20,000 characters can exceed.
+            if ($finalError === null && text_byte_errors($final, ['closure_reason'])) {
+                $finalError = 'The closure reason is too long.';
+            }
+            if ($finalError !== null) {
+                $flash = ['type' => 'err', 'text' => $finalError];
+            } else {
+            // Conditioned on lock_version still matching what this form was loaded with —
+            // a blind UPDATE here would let two staff editing the same case's formulation
+            // at once silently overwrite each other with no warning (last write wins,
+            // first staff member's edits just vanish). updated_at was tried first but
+            // isn't safe for this: it only has second-level precision, so two edits
+            // within the same second would look identical and the race wouldn't actually
+            // be caught — lock_version is bumped by exactly 1 on every such write instead,
+            // so it can't collide regardless of timing. rowCount() of 0 means the row
+            // changed underneath this submission (any write to it bumps lock_version,
+            // including a status change, not just another update_final), so that staff
+            // member needs to reload and see what changed before retrying.
+            $stmt = $pdo->prepare(
                 'UPDATE gs_requests SET final_formulation=?, final_concentration=?, final_quantity=?, final_price=?,
-                 courier=?, tracking_number=?, dispatch_date=?, closure_reason=? WHERE id=?'
-            )->execute([...array_values($final), $id]);
-            audit('formulation_recorded', 'gs_request', $id, ['fields' => array_keys(array_filter($final, fn($v) => $v !== null))]);
-            $flash = ['type' => 'ok', 'text' => 'Case details updated.'];
-            $case = array_merge($case, $final);
+                 courier=?, tracking_number=?, dispatch_date=?, closure_reason=?, lock_version=lock_version+1
+                 WHERE id=? AND lock_version=?'
+            );
+            $stmt->execute([...array_values($final), $id, (int) ($_POST['expected_lock_version'] ?? -1)]);
+            if ($stmt->rowCount() === 0) {
+                $flash = ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
+            } else {
+                audit('formulation_recorded', 'gs_request', $id, ['fields' => array_keys(array_filter($final, fn($v) => $v !== null))]);
+                $flash = ['type' => 'ok', 'text' => 'Case details updated.'];
+            }
+            }
         } elseif ($action === 'assign_staff') {
             $assignedId = (int) ($_POST['assigned_staff_id'] ?? 0) ?: null;
-            $pdo->prepare('UPDATE gs_requests SET assigned_staff_id = ? WHERE id = ?')->execute([$assignedId, $id]);
-            audit('case_assigned', 'gs_request', $id, ['assigned_staff_id' => $assignedId]);
-            $flash = ['type' => 'ok', 'text' => 'Assignment updated.'];
-            $case['assigned_staff_id'] = $assignedId;
+            // An id that doesn't exist used to hit the foreign key and surface as a 500, and
+            // a deactivated account (which can no longer sign in to do anything with the case)
+            // could still be picked — only an existing, active staff member is a valid target.
+            $validAssignee = true;
+            if ($assignedId !== null) {
+                $chk = $pdo->prepare('SELECT 1 FROM staff_users WHERE id = ? AND active = 1');
+                $chk->execute([$assignedId]);
+                $validAssignee = (bool) $chk->fetchColumn();
+            }
+            if (!$validAssignee) {
+                $flash = ['type' => 'err', 'text' => 'Choose an active staff member.'];
+                $stmt = null;
+            } else {
+            // Same optimistic-lock pattern as update_final above.
+            $stmt = $pdo->prepare('UPDATE gs_requests SET assigned_staff_id = ?, lock_version = lock_version + 1 WHERE id = ? AND lock_version = ?');
+            $stmt->execute([$assignedId, $id, (int) ($_POST['expected_lock_version'] ?? -1)]);
+            }
+            if ($stmt === null) {
+                // flash already set above
+            } elseif ($stmt->rowCount() === 0) {
+                $flash = ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
+            } else {
+                audit('case_assigned', 'gs_request', $id, ['assigned_staff_id' => $assignedId]);
+                $flash = ['type' => 'ok', 'text' => 'Assignment updated.'];
+            }
         } elseif ($action === 'send_email') {
             $senderEmail = trim($_POST['sender'] ?? '');
             $recipient   = trim($_POST['recipient'] ?? '');
@@ -88,25 +187,59 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // sender to Brevo-verified addresses only. mailer.php enforces the sender
             // restriction again server-side regardless of what this form allows.
             $allowedRecipients = array_filter([$case['owner_email'], $case['vet_email']]);
-            if (!array_key_exists($senderEmail, verified_senders())) {
+            $draft = ['sender' => $senderEmail, 'recipient' => $recipient, 'subject' => $subject, 'body' => $body];
+            if ($case['erased_at'] ?? null) {
+                $draft = null;
+                $flash = ['type' => 'err', 'text' => 'The personal data for this case has been erased — there is no address to email.'];
+            } elseif (!consume_one_time_token('send_email:' . $id)) {
+                // Not kept as a draft: this is most likely a resubmission of a send that already went out.
+                $draft = null;
+                // A double-click or an F5 resubmitting the same POST has exactly this
+                // shape — the token from that original form render was already consumed
+                // by whichever submission got here first, so a second one can't also send.
+                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) — reload and try again if you still need to send it.'];
+            } elseif (!array_key_exists($senderEmail, verified_senders())) {
                 $flash = ['type' => 'err', 'text' => 'Select a valid sender address.'];
             } elseif (!in_array($recipient, $allowedRecipients, true)) {
                 $flash = ['type' => 'err', 'text' => 'Recipient must be an email address on file for this case.'];
             } elseif ($subject === '' || $body === '') {
                 $flash = ['type' => 'err', 'text' => 'Subject and message body are required.'];
+            } elseif (($ph = unresolved_placeholder($subject . "
+" . $body)) !== null) {
+                $flash = ['type' => 'err', 'text' => "This message still contains an unfilled placeholder: {$ph} — replace it before sending."];
+            } elseif (mb_strlen($subject) > 255) {
+                $flash = ['type' => 'err', 'text' => 'Subject must be 255 characters or fewer.'];
+            } elseif (mb_strlen($body) > 60000 || strlen($body) > TEXT_MAX_BYTES) { // case_emails.body is TEXT (bytes)
+                $flash = ['type' => 'err', 'text' => 'Message body is too long.'];
             } else {
                 $recipientName = $recipient === $case['owner_email'] ? $case['owner_full_name'] : ($recipient === $case['vet_email'] ? ($case['vet_name'] ?? '') : '');
                 $sent = send_case_email($pdo, $id, $staff['id'], $recipient, $recipientName, $subject, $body, $senderEmail);
+                if ($sent) $draft = null; // a failed send keeps the draft so it can be retried
                 audit($sent ? 'email_sent' : 'email_failed', 'gs_request', $id, ['recipient' => $recipient, 'sender' => $senderEmail]);
                 $flash = $sent
                     ? ['type' => 'ok', 'text' => 'Email sent.']
                     : ['type' => 'err', 'text' => 'Email failed to send. The attempt has been logged below.'];
             }
         } elseif ($action === 'no_email_needed') {
-            audit('email_not_needed', 'gs_request', $id, ['status' => $case['status']]);
-            $flash = ['type' => 'ok', 'text' => 'Noted — no email needed for this update.'];
+            // Same one-time token as send_email (both buttons live in one form), so a double-click
+            // can't write two audit entries.
+            if (!consume_one_time_token('send_email:' . $id)) {
+                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) — reload if you still need to.'];
+            } else {
+                audit('email_not_needed', 'gs_request', $id, ['status' => $case['status']]);
+                $flash = ['type' => 'ok', 'text' => 'Noted — no email needed for this update.'];
+            }
         }
     }
+
+    // Re-fetch rather than patching individual fields in-memory above — any of the
+    // actions above (including change_status, which also touches this row) can have
+    // changed updated_at, and the forms below embed it as the optimistic-lock token for
+    // update_final/assign_staff's next submission. A stale in-memory value here would
+    // make the very next legitimate edit fail with a false "someone else changed this".
+    $stmt = $pdo->prepare('SELECT * FROM gs_requests WHERE id = ? LIMIT 1');
+    $stmt->execute([$id]);
+    $case = $stmt->fetch() ?: $case;
 }
 
 $documents = $pdo->prepare('SELECT * FROM gs_request_documents WHERE gs_request_id = ? ORDER BY created_at ASC');
@@ -125,7 +258,9 @@ $emails = $pdo->prepare('SELECT e.*, s.name AS staff_name FROM case_emails e LEF
 $emails->execute([$id]);
 $emails = $emails->fetchAll();
 
-$allStaff = $pdo->query('SELECT id, name FROM staff_users ORDER BY name ASC')->fetchAll();
+$allStaff = $pdo->prepare('SELECT id, name FROM staff_users WHERE active = 1 OR id = ? ORDER BY name ASC');
+$allStaff->execute([(int) ($case['assigned_staff_id'] ?? 0)]);
+$allStaff = $allStaff->fetchAll();
 
 // Predefined email templates, one per owner-facing status plus a blank/custom option.
 // Rebuilt fresh on every render from the case's current final-formulation/fulfilment
@@ -196,6 +331,9 @@ require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · GS-441524 case</p>
     <h1 class="doc-title">GS-<?= $id ?></h1>
+    <?php if (!empty($case['erased_at'])): ?>
+      <div class="alert">Personal data for this case was erased on <?= htmlspecialchars(fmt_time($case['erased_at']), ENT_QUOTES) ?>. Names, contact details, documents, emails and notes are gone; only the case record and its status history remain.</div>
+    <?php endif; ?>
     <p class="doc-meta">
       <?= $case['source'] === 'cat_owner' ? 'Cat owner submission' : 'Veterinarian submission' ?><span class="sep">·</span>
       <span class="status-pill status-<?= htmlspecialchars($case['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $case['status'])) ?></span><span class="sep">·</span>
@@ -263,6 +401,7 @@ require __DIR__ . '/../../includes/layout-header.php';
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="update_final">
+        <input type="hidden" name="expected_lock_version" value="<?= (int) $case['lock_version'] ?>">
         <div class="field-row three">
           <label class="field"><span class="lbl">Final formulation</span><input type="text" name="final_formulation" value="<?= htmlspecialchars($case['final_formulation'] ?? '', ENT_QUOTES) ?>"></label>
           <label class="field"><span class="lbl">Concentration / strength</span><input type="text" name="final_concentration" value="<?= htmlspecialchars($case['final_concentration'] ?? '', ENT_QUOTES) ?>"></label>
@@ -286,6 +425,7 @@ require __DIR__ . '/../../includes/layout-header.php';
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="change_status">
+        <input type="hidden" name="expected_lock_version" value="<?= (int) $case['lock_version'] ?>">
         <div class="field-row two">
           <label class="field">
             <span class="lbl">New status</span>
@@ -317,6 +457,7 @@ require __DIR__ . '/../../includes/layout-header.php';
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="assign_staff">
+        <input type="hidden" name="expected_lock_version" value="<?= (int) $case['lock_version'] ?>">
         <div class="field-row two">
           <label class="field">
             <span class="lbl">Assigned to</span>
@@ -355,6 +496,7 @@ require __DIR__ . '/../../includes/layout-header.php';
       <p class="field-hint" style="margin-bottom:1rem;">Nothing is ever sent automatically. Pick a template, review and edit the formulation, price and payment link, then send it yourself — or mark that no email is needed.</p>
       <form method="POST">
         <?= csrf_field() ?>
+        <?= one_time_field('send_email:' . $id) ?>
         <div class="field-row two">
           <label class="field">
             <span class="lbl">Template</span>
@@ -368,7 +510,7 @@ require __DIR__ . '/../../includes/layout-header.php';
             <span class="lbl">Sender</span>
             <select name="sender">
               <?php foreach (verified_senders() as $email => $name): ?>
-                <option value="<?= htmlspecialchars($email, ENT_QUOTES) ?>"><?= htmlspecialchars($name, ENT_QUOTES) ?> &lt;<?= htmlspecialchars($email, ENT_QUOTES) ?>&gt;</option>
+                <option value="<?= htmlspecialchars($email, ENT_QUOTES) ?>" <?= ($draft['sender'] ?? '') === $email ? 'selected' : '' ?>><?= htmlspecialchars($name, ENT_QUOTES) ?> &lt;<?= htmlspecialchars($email, ENT_QUOTES) ?>&gt;</option>
               <?php endforeach; ?>
             </select>
           </label>
@@ -377,18 +519,18 @@ require __DIR__ . '/../../includes/layout-header.php';
           <label class="field">
             <span class="lbl">Recipient</span>
             <select name="recipient">
-              <?php if ($case['owner_email']): ?><option value="<?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?>">Owner — <?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?></option><?php endif; ?>
-              <?php if ($case['vet_email']): ?><option value="<?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?>">Veterinarian — <?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?></option><?php endif; ?>
+              <?php if ($case['owner_email']): ?><option value="<?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['owner_email'] ? 'selected' : '' ?>>Owner — <?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?></option><?php endif; ?>
+              <?php if ($case['vet_email']): ?><option value="<?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['vet_email'] ? 'selected' : '' ?>>Veterinarian — <?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?></option><?php endif; ?>
             </select>
           </label>
           <label class="field">
             <span class="lbl">Subject</span>
-            <input type="text" id="email-subject" name="subject" value="<?= htmlspecialchars($emailTemplates['blank']['subject'], ENT_QUOTES) ?>">
+            <input type="text" id="email-subject" name="subject" value="<?= htmlspecialchars($draft['subject'] ?? $emailTemplates['blank']['subject'], ENT_QUOTES) ?>">
           </label>
         </div>
         <label class="field">
           <span class="lbl">Message</span>
-          <textarea id="email-body" name="body" rows="8" placeholder="Select a template above, or write a custom message…"><?= htmlspecialchars($emailTemplates['blank']['body'], ENT_QUOTES) ?></textarea>
+          <textarea id="email-body" name="body" rows="8" placeholder="Select a template above, or write a custom message…"><?= htmlspecialchars($draft['body'] ?? $emailTemplates['blank']['body'], ENT_QUOTES) ?></textarea>
         </label>
         <div style="display:flex; gap:0.75rem; flex-wrap:wrap; margin-top:1rem;">
           <button type="submit" name="action" value="send_email" class="btn-primary">Send Email</button>

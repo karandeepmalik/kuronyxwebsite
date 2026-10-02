@@ -4,6 +4,11 @@ require __DIR__ . '/../includes/auth.php';
 
 csrf_token();
 
+// The URL of this page carries a one-time token: keep it out of browser/proxy caches, and never send it
+// anywhere as a Referer.
+header('Cache-Control: no-store');
+header('Referrer-Policy: no-referrer');
+
 $rawToken = trim($_GET['token'] ?? $_POST['token'] ?? '');
 $errors   = [];
 $done     = false;
@@ -16,12 +21,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         $password = (string) ($_POST['password'] ?? '');
         $confirm  = (string) ($_POST['password_confirm'] ?? '');
         if (strlen($password) < 12) $errors['password'] = 'Use at least 12 characters';
+        elseif (strlen($password) > PASSWORD_MAX_BYTES) $errors['password'] = 'Use at most 72 characters';
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
             if (complete_password_reset('vet_accounts', (int) $account['id'], $rawToken, $password)) {
-                db()->prepare('DELETE FROM login_attempts WHERE identifier = ?')->execute(['vet:' . strtolower($account['email'])]);
-                audit('password_reset_completed', 'vet_account', (int) $account['id'], [], 'public');
+                clear_login_attempts('vet:' . strtolower($account['email']));
+                audit('password_reset_completed', 'vet_account', (int) $account['id'], [], 'vet', (int) $account['id']);
                 $done = true;
             } else {
                 $account = null; // someone else already used this link first

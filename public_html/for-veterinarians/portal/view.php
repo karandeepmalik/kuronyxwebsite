@@ -65,7 +65,14 @@ require __DIR__ . '/../../includes/layout-header.php';
       <?php endif; ?>
     </div>
 
-    <?php if ($case['final_formulation'] || $case['final_price'] || $case['tracking_number']): ?>
+    <?php
+    // Staff fill in the final formulation/price while a case is still being discussed or
+    // reviewed — showing those fields to the vet at that point exposes numbers staff haven't
+    // decided to share yet (and may still change). Only revealed once the case has actually
+    // been approved/moved into fulfilment.
+    $fulfilmentVisible = in_array($case['status'], ['approved','compounding','ready_for_dispatch','dispatched','finished'], true);
+    ?>
+    <?php if ($fulfilmentVisible && ($case['final_formulation'] || $case['final_price'] || $case['tracking_number'])): ?>
     <div class="card-panel">
       <h2>Formulation &amp; fulfilment</h2>
       <div class="kv-grid">

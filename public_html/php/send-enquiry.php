@@ -2,19 +2,9 @@
 require_once 'config.php';
 require_once __DIR__ . '/../includes/auth.php';
 
-// Only allow POST requests
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    exit('Method not allowed');
-}
-
 // Dynamic CORS validation
-$allowedOrigins = [
-    'https://kuronyx.in',
-    'https://www.kuronyx.in'
-];
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$originAllowed = in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin);
+$origin = allowed_site_origin();
+$originAllowed = $origin !== null;
 if ($originAllowed) {
     header('Access-Control-Allow-Origin: ' . $origin);
 }
@@ -22,9 +12,16 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Content-Type: application/json');
 
-// Handle preflight OPTIONS request
+// Handle preflight OPTIONS request (before the POST-only check, or it would always get a 405)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
+    http_response_code(204);
+    exit;
+}
+
+// Only allow POST requests
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('Method not allowed');
 }
 
 // See send-welcome.php for why this is checked again here rather than only gating the
@@ -36,25 +33,50 @@ if (!$originAllowed) {
     exit;
 }
 
-if (rate_limited('send_enquiry:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 5, 60)) {
+if (rate_limited('send_enquiry:' . client_ip(), 5, 60)) {
     http_response_code(429);
     echo json_encode(['success' => false, 'message' => 'Too many requests. Please try again later.']);
     exit;
 }
 // Get raw JSON payload
 $input = json_decode(file_get_contents('php://input'), true);
+if (!is_array($input)) $input = [];
 
-$name    = trim($input['name'] ?? '');
-$clinic  = trim($input['clinic'] ?? '');
-$city    = trim($input['city'] ?? '');
-$email   = filter_var(trim($input['email'] ?? ''), FILTER_VALIDATE_EMAIL);
-$phone   = trim($input['phone'] ?? '');
-$message = trim($input['message'] ?? '');
+// A non-string value (e.g. {"name": []}) would otherwise throw from trim() — treat as empty.
+$str = fn(string $key): string => is_string($input[$key] ?? null) ? trim($input[$key]) : '';
+$name    = $str('name');
+$clinic  = $str('clinic');
+$city    = $str('city');
+$rawEmail = $str('email');
+$phone   = $str('phone');
+$message = $str('message');
 
-// Server-side validation
-if (empty($name) || empty($clinic) || empty($city) || !$email || empty($phone) || empty($message)) {
+// Honeypot (the hidden "bot-field" input on the page): people never fill it in. Pretend it
+// worked so a script gets no signal to adapt to, and send nothing.
+if (!empty($input['bot-field'])) {
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Optional Cloudflare Turnstile — a no-op unless keys are configured (see captcha_verify()).
+if (!captcha_verify($str('cf-turnstile-response'))) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Please complete the verification check and try again.']);
+    exit;
+}
+
+// Server-side validation. Length caps match the other public forms' column sizes; without
+// them anyone could push megabytes through to Brevo and the ops inbox.
+$email = mb_strlen($rawEmail) <= 190 ? filter_var($rawEmail, FILTER_VALIDATE_EMAIL) : false;
+if ($name === '' || $clinic === '' || $city === '' || !$email || $phone === '' || $message === ''
+    || !preg_match('/^[0-9+()\-\s.]{5,30}$/', $phone)) {
     http_response_code(400);
     echo json_encode(['success' => false, 'message' => 'Please fill in all fields with valid information.']);
+    exit;
+}
+if (mb_strlen($name) > 150 || mb_strlen($clinic) > 190 || mb_strlen($city) > 100 || mb_strlen($message) > 5000) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'One of the fields is too long. Please shorten it and try again.']);
     exit;
 }
 
@@ -62,7 +84,9 @@ if (empty($name) || empty($clinic) || empty($city) || !$email || empty($phone) |
 $payload = json_encode([
     'to'         => [['email' => RECEIVER_EMAIL, 'name' => SENDER_NAME]],
     'templateId' => BREVO_ENQUIRY_TEMPLATE_ID,
-    'replyTo'    => ['email' => $email, 'name' => $name],
+    // No replyTo: the address is whatever the (unverified) submitter typed, so a plain "Reply"
+    // in the ops mailbox would write to it blindly. It is still in params below — the
+    // template shows it, and staff copy it deliberately.
     'params'     => [
         'name'    => $name,
         'clinic'  => $clinic,
@@ -76,6 +100,8 @@ $payload = json_encode([
 $ch = curl_init('https://api.brevo.com/v3/smtp/email');
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_CONNECTTIMEOUT => 5,
     CURLOPT_POST           => true,
     CURLOPT_POSTFIELDS     => $payload,
     CURLOPT_HTTPHEADER     => [

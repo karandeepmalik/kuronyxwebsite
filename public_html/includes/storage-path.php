@@ -4,7 +4,7 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
     exit('Forbidden.');
 }
 
-require_once __DIR__ . '/db-config.php';
+require_once __DIR__ . '/db.php';
 
 // Absolute path to the off-webroot document store. Falls back to a local
 // folder (still outside public_html) only when PRIVATE_STORAGE_PATH hasn't

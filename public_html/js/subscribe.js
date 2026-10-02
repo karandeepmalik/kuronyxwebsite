@@ -33,21 +33,16 @@
     status.style.color = '';
 
     try {
-      // 1. Submit to Netlify form storage
-      const data = new FormData(form);
-      const body = new URLSearchParams();
-      data.forEach((v, k) => body.append(k, v));
-      fetch('/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: body.toString()
-      }).catch(err => console.log('Netlify submission bypassed/failed:', err));
-
-      // 2. Call the backend PHP script to send the Brevo welcome email
+      // Call the backend PHP script to send the Brevo welcome email
+      const payload = { email, 'bot-field': (form.querySelector('[name="bot-field"]') || {}).value || '' };
+      if (window.KuronyxCaptcha && KuronyxCaptcha.enabled) {
+        payload['cf-turnstile-response'] = KuronyxCaptcha.token(form);
+        if (!payload['cf-turnstile-response']) throw new Error('Please complete the verification check');
+      }
       const res = await fetch("/php/send-welcome.php", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email }),
+        body: JSON.stringify(payload),
       });
       const resData = await res.json();
 
@@ -81,7 +76,7 @@
       }
     } catch (err) {
       form.classList.add('is-err');
-      status.textContent = "⚠ Connection error. Try again.";
+      status.textContent = "⚠ " + (err && err.message && err.message.startsWith('Please') ? err.message : "Connection error. Try again.");
       status.style.color = '#ff8787';
       console.error('Submission connection exception:', err);
       btn.disabled = false;

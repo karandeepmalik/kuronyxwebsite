@@ -10,11 +10,14 @@ if ($status !== '') { $where[] = 'status = ?'; $params[] = $status; }
 
 $sql = 'SELECT id, full_name, clinic_name, registration_number, status, created_at FROM vet_applications';
 if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
-$sql .= ' ORDER BY created_at DESC LIMIT 200';
+$page = list_page();
+$sql .= ' ORDER BY created_at DESC LIMIT ' . (LIST_PAGE_SIZE + 1) . ' OFFSET ' . (($page - 1) * LIST_PAGE_SIZE);
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+$hasMore = count($rows) > LIST_PAGE_SIZE;
+$rows = array_slice($rows, 0, LIST_PAGE_SIZE);
 
 $statuses = ['pending','under_review','approved','rejected','suspended'];
 
@@ -62,4 +65,5 @@ require __DIR__ . '/../../includes/layout-header.php';
       </tbody>
     </table>
     </div>
+    <?= list_pager($page, $hasMore) ?>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

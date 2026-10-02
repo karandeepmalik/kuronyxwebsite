@@ -2,6 +2,7 @@
 require __DIR__ . '/../../includes/db.php';
 require __DIR__ . '/../../includes/auth.php';
 require __DIR__ . '/../../includes/upload.php';
+require __DIR__ . '/../../includes/data-protection.php';
 $vet = require_vet_login();
 
 $pdo = db();
@@ -17,6 +18,10 @@ $old    = $_POST ?? [];
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $errors['_form'] = 'Your session expired. Please review and submit the form again.';
+    } elseif (!consume_one_time_token('vet_portal_new_request:' . $vet['id'])) {
+        // See for-cat-owners/index.php's identical guard — a double-click or an F5
+        // resubmitting the same POST must not create a second case.
+        $errors['_form'] = 'This form was already submitted. If you need to submit again, please reload the page first.';
     } else {
         $fields = [
             'owner_full_name' => trim($_POST['owner_full_name'] ?? ''),
@@ -44,6 +49,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($required as $key) {
             if ($fields[$key] === '') $errors[$key] = 'Required';
         }
+        // Column-size and format checks up front — without them an over-long value reaches the
+        // INSERT, where MySQL throws (a 500 that loses the visitor's whole submission and
+        // uploads) or, in non-strict mode, silently truncates it; and patient_sex only
+        // survived because the DB's own ENUM/CHECK rejected anything else.
+        foreach (field_length_errors($fields, [
+            'owner_full_name' => 150, 'owner_email' => 190, 'owner_phone' => 30, 'owner_address' => 255,
+            'owner_city' => 100, 'owner_state' => 100, 'owner_pin' => 20, 'owner_country' => 100,
+            'patient_name' => 100, 'patient_breed' => 100, 'patient_microchip' => 100, 'clinical_notes' => 20000,
+            'vet_name' => 150, 'vet_clinic' => 190, 'vet_email' => 190, 'vet_phone' => 30, 'vet_registration_info' => 190,
+        ]) as $key) {
+            $errors[$key] = 'Too long';
+        }
+        foreach (text_byte_errors($fields, ['clinical_notes']) as $key) {
+            $errors[$key] = 'Too long'; // TEXT column: the limit is in bytes, not characters
+        }
+        if (!in_array($fields['patient_sex'], ['male', 'female', 'unknown'], true)) {
+            $errors['patient_sex'] = 'Select a valid option';
+        }
+        foreach (['owner_phone', 'vet_phone'] as $phoneKey) {
+            if (isset($fields[$phoneKey]) && $fields[$phoneKey] !== '' && !preg_match('/^[0-9+()\-\s.]{5,30}$/', $fields[$phoneKey])) {
+                $errors[$phoneKey] = 'Enter a valid phone number';
+            }
+        }
         if ($fields['owner_email'] !== '' && !filter_var($fields['owner_email'], FILTER_VALIDATE_EMAIL)) {
             $errors['owner_email'] = 'Enter a valid email address';
         }
@@ -68,10 +96,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $weight = null;
         if ($fields['patient_weight_kg'] !== '') {
-            if (is_numeric($fields['patient_weight_kg']) && (float) $fields['patient_weight_kg'] > 0) {
-                $weight = (float) $fields['patient_weight_kg'];
-            } else {
-                $errors['patient_weight_kg'] = 'Enter a valid weight';
+            $weight = parse_patient_weight($fields['patient_weight_kg']);
+            if ($weight === null) {
+                $errors['patient_weight_kg'] = 'Enter a valid weight (up to 999.99 kg)';
             }
         }
 
@@ -143,14 +170,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $consentStmt = $pdo->prepare(
                     'INSERT INTO consent_records (gs_request_id, consent_type, consent_text_version, ip_address, user_agent)
-                     VALUES (?, \'case_processing\', \'privacy-policy-2026-07-18\', ?, ?)'
+                     VALUES (?, \'case_processing\', ?, ?, ?)'
                 );
-                $consentStmt->execute([$requestId, $_SERVER['REMOTE_ADDR'] ?? null, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
+                $consentStmt->execute([$requestId, privacy_policy_version(), client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
 
                 $pdo->prepare(
                     'INSERT INTO case_status_history (gs_request_id, previous_status, new_status, changed_by, note)
                      VALUES (?, NULL, \'submitted\', NULL, \'Case submitted by veterinarian via portal\')'
                 )->execute([$requestId]);
+
+                // Audited *inside* the transaction, before it commits — see
+                // for-cat-owners/index.php's identical reasoning.
+                audit('case_submitted', 'gs_request', $requestId, ['source' => 'veterinarian', 'vet_account_id' => $vet['id']], 'vet', (int) $vet['id']);
 
                 $pdo->commit();
             } catch (Throwable $e) {
@@ -171,7 +202,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($errors)) {
-                audit('case_submitted', 'gs_request', $requestId, ['source' => 'veterinarian', 'vet_account_id' => $vet['id']], 'public');
                 header('Location: /for-veterinarians/portal/view.php?id=' . $requestId . '&submitted=1');
                 exit;
             }
@@ -201,6 +231,7 @@ function ov(array $old, string $key): string { return htmlspecialchars($old[$key
 
     <form method="POST" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
+      <?= one_time_field('vet_portal_new_request:' . $vet['id']) ?>
 
       <fieldset>
         <legend>Owner information</legend>

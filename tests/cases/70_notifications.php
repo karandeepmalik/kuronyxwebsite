@@ -7,9 +7,10 @@ return function (TestEnv $env): void {
 
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $lockVersion = $env->scalar('SELECT lock_version FROM gs_requests WHERE id = ?', [$id]);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf, 'action' => 'change_status', 'new_status' => 'approved', 'status_note' => ''],
+            'body' => ['csrf_token' => $csrf, 'action' => 'change_status', 'new_status' => 'approved', 'status_note' => '', 'expected_lock_version' => $lockVersion],
         ]);
         assert_contains('Nothing is emailed automatically', $post['body']);
         assert_true(strpos($post['body'], 'notified by email') === false, 'no automatic notification copy should appear');
@@ -24,10 +25,11 @@ return function (TestEnv $env): void {
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf, 'action' => 'send_email', 'sender' => 'attacker@evil.test',
+                'csrf_token' => $csrf, 'ott' => $ott, 'action' => 'send_email', 'sender' => 'attacker@evil.test',
                 'recipient' => 'priya@example.test', 'subject' => 'x', 'body' => 'y',
             ],
         ]);
@@ -39,10 +41,11 @@ return function (TestEnv $env): void {
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
+                'csrf_token' => $csrf, 'ott' => $ott, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
                 'recipient' => 'someone-else@example.test', 'subject' => 'x', 'body' => 'y',
             ],
         ]);
@@ -54,12 +57,13 @@ return function (TestEnv $env): void {
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
         assert_contains('Ready for Dispatch', $view['body'], 'the template dropdown should offer a per-status option');
 
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf, 'action' => 'send_email', 'sender' => 'ops@kuronyx.in',
+                'csrf_token' => $csrf, 'ott' => $ott, 'action' => 'send_email', 'sender' => 'ops@kuronyx.in',
                 'recipient' => 'priya@example.test', 'subject' => 'Following up', 'body' => 'Just checking in on your prescription.',
             ],
         ]);
@@ -73,6 +77,36 @@ return function (TestEnv $env): void {
         assert_equal('ops@kuronyx.in', $row['sender'], 'the chosen sender should be recorded, not just the legacy default');
     });
 
+    run_test('resubmitting the same send_email form (double-click / F5) sends at most once', function () use ($env) {
+        // Regression test for the email-double-send fix: a double-click or a stale page
+        // reload resubmitting the exact same POST now embeds a one-time token
+        // (one_time_field()/consume_one_time_token() in auth.php) that's only ever valid
+        // for the first submission of a given form render — the second one is rejected
+        // outright, before send_case_email() (and therefore the real Brevo call) is ever
+        // reached.
+        $id  = $env->shared['gsRequestId'];
+        $jar = $env->cookieJarStaff;
+        $countBefore = (int) $env->scalar('SELECT COUNT(*) FROM case_emails WHERE gs_request_id = ?', [$id]);
+
+        $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
+        $body = [
+            'csrf_token' => $csrf, 'ott' => $ott, 'action' => 'send_email', 'sender' => 'ops@kuronyx.in',
+            'recipient' => 'priya@example.test', 'subject' => 'Double-send check', 'body' => 'This must only ever be logged once.',
+        ];
+
+        $first = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar, 'body' => $body]);
+        assert_contains('Email sent', $first['body']);
+
+        // Same jar (same session), same token — exactly what a double-click fires.
+        $second = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar, 'body' => $body]);
+        assert_contains('already submitted', $second['body']);
+
+        $countAfter = (int) $env->scalar("SELECT COUNT(*) FROM case_emails WHERE gs_request_id = ? AND subject = 'Double-send check'", [$id]);
+        assert_equal(1, $countAfter, 'the resubmission must not have logged (or sent) a second email');
+    });
+
     run_test('marking a case update "no email needed" logs it without sending anything', function () use ($env) {
         $id  = $env->shared['gsRequestId'];
         $jar = $env->cookieJarStaff;
@@ -80,9 +114,10 @@ return function (TestEnv $env): void {
 
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf, 'action' => 'no_email_needed'],
+            'body' => ['csrf_token' => $csrf, 'ott' => $ott, 'action' => 'no_email_needed'],
         ]);
         assert_contains('Noted', $post['body']);
         assert_equal($countBefore, (int) $env->scalar('SELECT COUNT(*) FROM case_emails WHERE gs_request_id = ?', [$id]));
@@ -115,10 +150,11 @@ return function (TestEnv $env): void {
         $link = $m[0];
 
         $csrf2 = extract_csrf($gen['body']);
+        $ott2  = extract_ott($gen['body']);
         $send = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf2, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
+                'csrf_token' => $csrf2, 'ott' => $ott2, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
                 'recipient' => 'asha.verma@example.test', 'subject' => 'Your Kuronyx veterinary account is approved',
                 'body' => "Set your password here:\n{$link}\n\nReference: VA-{$id}",
             ],
@@ -134,21 +170,80 @@ return function (TestEnv $env): void {
         assert_contains('Emailed applicant', $notes);
     });
 
+    run_test('sending a message containing an activation link that has since been replaced is rejected', function () use ($env) {
+        // Regression test for the generate_activation_link race: generating a fresh link
+        // always invalidates the previous one. If that happens between drafting a message
+        // and actually sending it (two staff, or the same staff in another tab), the body
+        // can still contain a dead link — this proves send_email re-checks the embedded
+        // token against the account's current one at send time, not just when drafted.
+        $id  = $env->shared['vetApplicationId'];
+        $jar = $env->cookieJarStaff;
+
+        $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($view['body']);
+        $genA = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'action' => 'generate_activation_link', 'note' => ''],
+        ]);
+        assert_true((bool) preg_match('#https://kuronyx\.in/for-veterinarians/activate\.php\?token=[a-f0-9]+#', $genA['body'], $m), 'expected a fresh link (A)');
+        $staleLink = $m[0];
+
+        // Regenerating invalidates the one just captured above.
+        $csrf2 = extract_csrf($genA['body']);
+        $genB = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf2, 'action' => 'generate_activation_link', 'note' => ''],
+        ]);
+        assert_true((bool) preg_match('#https://kuronyx\.in/for-veterinarians/activate\.php\?token=[a-f0-9]+#', $genB['body'], $m2), 'expected a fresh link (B)');
+        $freshLink = $m2[0];
+        assert_true($staleLink !== $freshLink, 'regenerating should produce a different token');
+
+        // Sending the now-stale link (as if the compose box still had it from before B
+        // was generated) must be refused.
+        $csrf3 = extract_csrf($genB['body']);
+        $ott3  = extract_ott($genB['body']);
+        $staleSend = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf3, 'ott' => $ott3, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
+                'recipient' => 'asha.verma@example.test', 'subject' => 'Your Kuronyx veterinary account is approved',
+                'body' => "Set your password here:\n{$staleLink}\n\nReference: VA-{$id}",
+            ],
+        ]);
+        assert_contains('no longer valid', $staleSend['body']);
+        assert_true(strpos($staleSend['body'], 'Email sent') === false, 'the stale link must not have been sent');
+
+        // Sending the current, still-live link succeeds normally.
+        $csrf4 = extract_csrf($staleSend['body']);
+        $ott4  = extract_ott($staleSend['body']);
+        $freshSend = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf4, 'ott' => $ott4, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
+                'recipient' => 'asha.verma@example.test', 'subject' => 'Your Kuronyx veterinary account is approved',
+                'body' => "Set your password here:\n{$freshLink}\n\nReference: VA-{$id}",
+            ],
+        ]);
+        assert_contains('Email sent', $freshSend['body']);
+    });
+
     run_test('the vet-application composer also rejects an unverified sender and an off-file recipient', function () use ($env) {
         $id  = $env->shared['vetApplicationId'];
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
+        $ott  = extract_ott($view['body']);
         $badSender = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf, 'action' => 'send_email', 'sender' => 'attacker@evil.test', 'recipient' => 'asha.verma@example.test', 'subject' => 'x', 'body' => 'y'],
+            'body' => ['csrf_token' => $csrf, 'ott' => $ott, 'action' => 'send_email', 'sender' => 'attacker@evil.test', 'recipient' => 'asha.verma@example.test', 'subject' => 'x', 'body' => 'y'],
         ]);
         assert_contains('valid sender address', $badSender['body']);
 
         $csrf2 = extract_csrf($badSender['body']);
+        $ott2  = extract_ott($badSender['body']);
         $badRecipient = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf2, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in', 'recipient' => 'someone-else@example.test', 'subject' => 'x', 'body' => 'y'],
+            'body' => ['csrf_token' => $csrf2, 'ott' => $ott2, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in', 'recipient' => 'someone-else@example.test', 'subject' => 'x', 'body' => 'y'],
         ]);
         assert_contains('on file for this application', $badRecipient['body']);
     });
@@ -173,7 +268,7 @@ return function (TestEnv $env): void {
         $csrf2 = extract_csrf($post['body']);
         $noEmail = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf2, 'action' => 'no_email_needed', 'note' => ''],
+            'body' => ['csrf_token' => $csrf2, 'ott' => extract_ott($post['body']), 'action' => 'no_email_needed', 'note' => ''],
         ]);
         assert_contains('Noted', $noEmail['body']);
         assert_contains('no email needed', strtolower((string) $env->scalar('SELECT internal_notes FROM vet_applications WHERE id = ?', [$id])));

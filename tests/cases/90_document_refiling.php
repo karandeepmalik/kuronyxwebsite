@@ -14,10 +14,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-vetapply-doc.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'full_name' => 'Dr. Refile Test', 'professional_email' => 'refile.test@example.test', 'mobile' => '9000000001',
                 'registration_number' => 'MH-VET-1000', 'registration_state' => 'Maharashtra', 'registration_country' => 'India',
                 'qualification' => 'BVSc & AH', 'year_qualified' => '2019', 'practice_type' => 'Independent practice',
@@ -53,10 +54,11 @@ return function (TestEnv $env): void {
 
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Refile Owner', 'owner_email' => 'refileowner@example.test', 'owner_phone' => '9333333333',
                 'owner_address' => '9 Refile Ave', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411006',
                 'patient_name' => 'Refile Cat', 'requested_formulation' => 'oral', 'consent' => '1',

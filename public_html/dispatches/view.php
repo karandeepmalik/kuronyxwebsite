@@ -36,7 +36,7 @@ require __DIR__ . '/../includes/layout-header.php';
     <h1 class="doc-title"><?= htmlspecialchars($article['title'], ENT_QUOTES) ?></h1>
     <p class="doc-meta">Kuronyx Sciences<span class="sep">·</span><?= htmlspecialchars(fmt_time($article['published_at']), ENT_QUOTES) ?></p>
 
-    <div class="lead" style="white-space:pre-wrap;"><?= nl2br(htmlspecialchars($article['body'], ENT_QUOTES)) ?></div>
+    <div class="lead"><?= nl2br(htmlspecialchars($article['body'], ENT_QUOTES)) ?></div>
 
     <p style="margin-top:2.5rem;"><a href="/dispatches" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">← Back to Dispatches</a></p>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

@@ -7,23 +7,25 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-vetapply-bad.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', [
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf, 'consent' => '1'],
+            'body' => ['csrf_token' => $csrf, 'ott' => $ott, 'consent' => '1'],
         ]);
         assert_equal(200, $post['status']);
         assert_contains('has-error', $post['body']);
         assert_contains('Please check the highlighted fields', $post['body']);
     });
 
-    run_test('vet application form accepts a valid submission', function () use ($env) {
+    run_test('vet application form accepts a valid submission', function () use ($env, $pngPath) {
         $jar = $env->tmpDir . '/cookies-vetapply-ok.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'full_name' => 'Dr. Asha Verma',
                 'professional_email' => 'asha.verma@example.test',
                 'mobile' => '9876543210',
@@ -41,6 +43,7 @@ return function (TestEnv $env): void {
                 'clinic_country' => 'India',
                 'clinic_phone' => '02012345678',
                 'consent' => '1',
+                'registration_certificate' => new CURLFile($pngPath, 'image/png', 'cert.png'),
             ],
         ]);
         assert_equal(302, $post['status']);
@@ -64,10 +67,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-vetapply-orphan.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'full_name' => 'Dr. Orphan Check', 'professional_email' => 'orphan.vet@example.test', 'mobile' => '9876543211',
                 'registration_number' => 'MH-VET-9999', 'registration_state' => 'Maharashtra', 'registration_country' => 'India',
                 'qualification' => 'BVSc & AH', 'year_qualified' => '2015', 'practice_type' => 'Independent practice',
@@ -91,10 +95,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-catowner-nofile.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Ravi Shah', 'owner_email' => 'ravi@example.test', 'owner_phone' => '9998887776',
                 'owner_address' => '1 Park Street', 'owner_city' => 'Mumbai', 'owner_state' => 'Maharashtra', 'owner_pin' => '400001',
                 'patient_name' => 'Momo', 'vet_name' => 'Dr. Rao', 'vet_clinic' => 'Rao Clinic',
@@ -114,10 +119,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-catowner-baddob.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Bad Date Owner', 'owner_email' => 'baddate@example.test', 'owner_phone' => '9998887772',
                 'owner_address' => '3 Test Street', 'owner_city' => 'Delhi', 'owner_state' => 'Delhi', 'owner_pin' => '110001',
                 'patient_name' => 'Rollover', 'patient_dob' => '2026-02-30',
@@ -146,10 +152,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-catowner-orphan.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Orphan Check', 'owner_email' => 'orphancheck@example.test', 'owner_phone' => '9998887773',
                 'owner_address' => '4 Test Street', 'owner_city' => 'Mumbai', 'owner_state' => 'Maharashtra', 'owner_pin' => '400002',
                 'patient_name' => 'Orphan', 'vet_name' => 'Dr. Rao', 'vet_clinic' => 'Rao Clinic',
@@ -172,10 +179,11 @@ return function (TestEnv $env): void {
         $jar = $env->tmpDir . '/cookies-catowner-ok.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Priya Nair', 'owner_email' => 'priya@example.test', 'owner_phone' => '9998887771',
                 'owner_address' => '2 Lake Road', 'owner_city' => 'Chennai', 'owner_state' => 'Tamil Nadu', 'owner_pin' => '600001',
                 'patient_name' => 'Simba', 'vet_name' => 'Dr. Iyer', 'vet_clinic' => 'Iyer Clinic',

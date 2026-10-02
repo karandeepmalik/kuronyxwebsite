@@ -20,11 +20,14 @@ if ($q !== '') {
 }
 $sql = 'SELECT id, source, owner_full_name, patient_name, requested_formulation, status, created_at, updated_at FROM gs_requests';
 if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
-$sql .= ' ORDER BY created_at DESC LIMIT 200';
+$page = list_page();
+$sql .= ' ORDER BY created_at DESC LIMIT ' . (LIST_PAGE_SIZE + 1) . ' OFFSET ' . (($page - 1) * LIST_PAGE_SIZE);
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
 $rows = $stmt->fetchAll();
+$hasMore = count($rows) > LIST_PAGE_SIZE;
+$rows = array_slice($rows, 0, LIST_PAGE_SIZE);
 
 $statuses = ['submitted','under_review','awaiting_information','communication_in_progress','formulation_discussion','approved','compounding','ready_for_dispatch','dispatched','finished','closed','cancelled','rejected'];
 
@@ -98,4 +101,5 @@ require __DIR__ . '/../../includes/layout-header.php';
       </tbody>
     </table>
     </div>
+    <?= list_pager($page, $hasMore) ?>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

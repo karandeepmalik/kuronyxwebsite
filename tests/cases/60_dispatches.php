@@ -43,6 +43,33 @@ return function (TestEnv $env): void {
         assert_equal(404, $r['status']);
     });
 
+    run_test('publishing a second dispatch with the same auto-generated slug gets a disambiguated one, not a raw error', function () use ($env) {
+        // Regression test for the slug-collision race: the code used to check for a
+        // conflicting slug first, then insert if none was found, as two separate
+        // statements — now it inserts directly and only disambiguates on an actual UNIQUE
+        // violation from the database. Submitting the exact same title again (so it
+        // auto-generates the exact same base slug) exercises that catch-and-retry path.
+        $jar = $env->cookieJarStaff;
+        $get = http_request('GET', $env->baseUrl . '/admin/dispatches/edit.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $post = http_request('POST', $env->baseUrl . '/admin/dispatches/edit.php', [
+            'cookie_jar' => $jar,
+            'body' => [
+                'csrf_token' => $csrf, 'action' => 'save',
+                'title' => 'A New Oral Formulation', 'slug' => '', 'excerpt' => 'A second, unrelated post.',
+                'body' => 'Different body text entirely.', 'status' => 'published',
+            ],
+        ]);
+        assert_contains('Dispatch created', $post['body']);
+
+        $rows = $env->pdo()->query("SELECT slug FROM dispatches WHERE title = 'A New Oral Formulation'")->fetchAll(PDO::FETCH_COLUMN);
+        assert_equal(2, count($rows), 'both dispatches with this title should exist');
+        assert_equal(2, count(array_unique($rows)), 'the two rows must not have ended up with the same slug — found: ' . implode(', ', $rows));
+        assert_true(in_array('a-new-oral-formulation', $rows, true), 'the first dispatch should keep its original slug');
+        $disambiguated = array_values(array_diff($rows, ['a-new-oral-formulation']))[0];
+        assert_true(str_starts_with($disambiguated, 'a-new-oral-formulation-'), 'the second should be the base slug plus a disambiguating suffix');
+    });
+
     run_test('a title with a special character is not double-escaped in the <title> tag', function () use ($env) {
         $jar = $env->cookieJarStaff;
         $get = http_request('GET', $env->baseUrl . '/admin/dispatches/edit.php', ['cookie_jar' => $jar]);

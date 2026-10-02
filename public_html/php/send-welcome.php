@@ -2,19 +2,9 @@
 require_once 'config.php';
 require_once __DIR__ . '/../includes/auth.php';
 
-// Only allow POST requests
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    http_response_code(405);
-    exit('Method not allowed');
-}
-
 // Dynamic CORS validation
-$allowedOrigins = [
-    'https://kuronyx.in',
-    'https://www.kuronyx.in'
-];
-$origin = $_SERVER['HTTP_ORIGIN'] ?? '';
-$originAllowed = in_array($origin, $allowedOrigins) || preg_match('/^https?:\/\/localhost(:\d+)?$/', $origin) || preg_match('/^https?:\/\/127\.0\.0\.1(:\d+)?$/', $origin);
+$origin = allowed_site_origin();
+$originAllowed = $origin !== null;
 if ($originAllowed) {
     header('Access-Control-Allow-Origin: ' . $origin);
 }
@@ -22,9 +12,16 @@ header('Access-Control-Allow-Headers: Content-Type, Authorization');
 header('Access-Control-Allow-Methods: POST, OPTIONS');
 header('Content-Type: application/json');
 
-// Handle preflight OPTIONS request
+// Handle preflight OPTIONS request (before the POST-only check, or it would always get a 405)
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
-    exit(0);
+    http_response_code(204);
+    exit;
+}
+
+// Only allow POST requests
+if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+    http_response_code(405);
+    exit('Method not allowed');
 }
 
 // The Origin allow-list above previously only controlled whether the browser could
@@ -42,14 +39,30 @@ if (!$originAllowed) {
 // This sends a real transactional email to whatever address is supplied, so it's also
 // a target for abuse (email-bombing an arbitrary inbox) independent of who's allowed
 // to read the response — throttle by IP.
-if (rate_limited('send_welcome:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 5, 60)) {
+if (rate_limited('send_welcome:' . client_ip(), 5, 60)) {
     http_response_code(429);
     echo json_encode(['success' => false, 'message' => 'Too many requests. Please try again later.']);
     exit;
 }
 // Get and validate email
 $input = json_decode(file_get_contents('php://input'), true);
-$email = filter_var(trim($input['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+if (!is_array($input)) $input = [];
+$rawEmail = is_string($input['email'] ?? null) ? trim($input['email']) : '';
+$email = mb_strlen($rawEmail) <= 190 ? filter_var($rawEmail, FILTER_VALIDATE_EMAIL) : false;
+
+// Honeypot (the hidden "bot-field" input on the page): people never fill it in. Pretend it
+// worked so a script gets no signal to adapt to, and send nothing.
+if (!empty($input['bot-field'])) {
+    echo json_encode(['success' => true]);
+    exit;
+}
+
+// Optional Cloudflare Turnstile — a no-op unless keys are configured (see captcha_verify()).
+if (!captcha_verify(is_string($input['cf-turnstile-response'] ?? null) ? $input['cf-turnstile-response'] : '')) {
+    http_response_code(400);
+    echo json_encode(['success' => false, 'message' => 'Please complete the verification check and try again.']);
+    exit;
+}
 
 if (!$email) {
     http_response_code(400);
@@ -67,6 +80,8 @@ $payload = json_encode([
 $ch = curl_init('https://api.brevo.com/v3/smtp/email');
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_TIMEOUT        => 15,
+    CURLOPT_CONNECTTIMEOUT => 5,
     CURLOPT_POST           => true,
     CURLOPT_POSTFIELDS     => $payload,
     CURLOPT_HTTPHEADER     => [
@@ -91,6 +106,8 @@ if ($httpCode === 201) {
     $chContact = curl_init('https://api.brevo.com/v3/contacts');
     curl_setopt_array($chContact, [
         CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_CONNECTTIMEOUT => 5,
         CURLOPT_POST           => true,
         CURLOPT_POSTFIELDS     => $contactPayload,
         CURLOPT_HTTPHEADER     => [

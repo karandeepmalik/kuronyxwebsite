@@ -27,7 +27,10 @@ $input = json_decode($rawInput, true);
 
 // Logged off-webroot (alongside the private document store) rather than inside
 // public_html/php/ — a log file there was previously directly downloadable by
-// anyone, since nothing in that folder restricts direct file access.
+// anyone, since nothing in that folder restricts direct file access. Every write below
+// uses FILE_APPEND | LOCK_EX — without the lock, two webhook deliveries arriving at once
+// (Brevo can send events in parallel) could interleave their writes mid-line and corrupt
+// one JSON log entry; the lock serializes them so each line is written whole.
 $logFile = private_storage_path() . '/webhook.log';
 $timestamp = date('Y-m-d H:i:s');
 
@@ -43,26 +46,39 @@ $logData = [
 if (!$input) {
     http_response_code(400);
     $logData['status'] = 'failed_bad_json';
-    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
     echo json_encode(['success' => false, 'message' => 'Invalid JSON input.']);
     exit;
 }
 
 $event = $input['event'] ?? '';
-$email = filter_var(trim($input['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+$email = filter_var(is_string($input['email'] ?? null) ? trim($input['email']) : '', FILTER_VALIDATE_EMAIL);
 $messageId = $input['message-id'] ?? $input['messageId'] ?? '';
 
 if ($event !== 'delivered') {
     $logData['status'] = 'ignored_non_delivered';
-    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
     echo json_encode(['success' => true, 'message' => 'Ignored non-delivered event.']);
+    exit;
+}
+
+// Only the newsletter welcome email may subscribe anyone. "delivered" fires for EVERY
+// transactional email sent through this Brevo account - staff case emails to pet owners and
+// vets, activation and password-reset mails, enquiry notifications - and none of those
+// recipients opted in to the newsletter. Brevo includes the template id of template-based
+// sends in the payload, so anything that isn't the welcome template is ignored.
+$templateId = $input['template_id'] ?? $input['templateId'] ?? null;
+if (!defined('BREVO_TEMPLATE_ID') || !is_numeric($templateId) || (int) $templateId !== (int) BREVO_TEMPLATE_ID) {
+    $logData['status'] = 'ignored_not_welcome_template';
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
+    echo json_encode(['success' => true, 'message' => 'Ignored: not a newsletter welcome email.']);
     exit;
 }
 
 if (!$email) {
     http_response_code(400);
     $logData['status'] = 'failed_invalid_email';
-    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
     echo json_encode(['success' => false, 'message' => 'Missing or invalid recipient email.']);
     exit;
 }
@@ -78,6 +94,8 @@ $payload = json_encode([
 $ch = curl_init('https://api.brevo.com/v3/contacts');
 curl_setopt_array($ch, [
     CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT        => 15,
+        CURLOPT_CONNECTTIMEOUT => 5,
     CURLOPT_POST           => true,
     CURLOPT_POSTFIELDS     => $payload,
     CURLOPT_HTTPHEADER     => [
@@ -102,7 +120,7 @@ $logData['api_response'] = [
 
 if ($httpCode === 201 || $httpCode === 204 || $httpCode === 200) {
     $logData['status'] = 'success';
-    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
     echo json_encode([
         'success' => true,
         'message' => 'Contact successfully added or updated on list.',
@@ -111,7 +129,7 @@ if ($httpCode === 201 || $httpCode === 204 || $httpCode === 200) {
 } else {
     http_response_code(500);
     $logData['status'] = 'failed_api_error';
-    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND);
+    file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
     error_log('[webhook] Brevo contact upsert failed (HTTP ' . $httpCode . '): ' . $response);
     echo json_encode([
         'success' => false,

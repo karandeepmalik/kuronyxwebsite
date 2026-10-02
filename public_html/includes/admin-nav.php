@@ -22,6 +22,7 @@ $adminNavItems = [
       <?php endforeach; ?>
       <?php if (($staff['role'] ?? null) === 'admin'): ?>
         <a href="/admin/staff/"<?= $activeAdminNav === 'staff' ? ' class="active"' : '' ?>>Staff</a>
+        <a href="/admin/data-erasure/"<?= $activeAdminNav === 'data-erasure' ? ' class="active"' : '' ?>>Data Erasure</a>
       <?php endif; ?>
-      <a href="/admin/logout.php" class="signout">Sign Out</a>
+      <form method="POST" action="/admin/logout.php" class="signout-form"><?= csrf_field() ?><button type="submit" class="signout">Sign Out</button></form>
     </nav>

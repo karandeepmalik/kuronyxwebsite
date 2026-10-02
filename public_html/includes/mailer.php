@@ -4,9 +4,21 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
     exit('Forbidden.');
 }
 
-require_once __DIR__ . '/db-config.php';
+require_once __DIR__ . '/db.php';
 
 class MailException extends \RuntimeException {}
+
+// The admin email templates deliberately contain bracketed fill-in-the-blank markers
+// ([insert payment link], [confirm final price], [courier name], [tracking number],
+// [click "Generate Activation Link"...]) that staff are meant to replace before sending.
+// Nothing stopped a message going out to a customer with one still in it verbatim. Returns
+// the first such leftover marker found in $text, or null.
+function unresolved_placeholder(string $text): ?string {
+    if (preg_match('/\[(?:insert|confirm|courier name|tracking number|click )[^\]]*\]/i', $text, $m)) {
+        return $m[0];
+    }
+    return null;
+}
 
 // The sender addresses staff are allowed to send as — must match what's actually
 // verified in Brevo (Settings → Senders & IP). Falls back to the single legacy
@@ -74,18 +86,45 @@ function send_transactional_email(string $toEmail, string $toName, string $subje
 // communication history rather than silently disappearing. $senderEmail defaults to
 // SENDER_EMAIL (see send_transactional_email) but is recorded either way, so the
 // history always shows which verified address a message actually went out from.
+//
+// Write-ahead: the log row is inserted as 'sending' *before* the network call, then
+// updated to 'sent'/'failed' afterward — not inserted only once the outcome is known. The
+// old order (send, then log) meant that if the send succeeded but the log INSERT then
+// failed for any reason (e.g. a subject too long for its column), a real email would have
+// gone out with no record of it at all, and the failed INSERT would itself surface as an
+// opaque error for what was actually a successful send. Recording the attempt first means
+// a log entry always exists from the moment a send is attempted, whatever happens next —
+// and a row stuck on 'sending' is itself diagnostic (the log INSERT worked but something
+// after it didn't), rather than a silent gap.
 function send_case_email(PDO $pdo, int $gsRequestId, ?int $staffId, string $recipient, string $recipientName, string $subject, string $body, ?string $senderEmail = null): bool {
     $senderEmail = $senderEmail ?? SENDER_EMAIL;
+    $stmt = $pdo->prepare(
+        "INSERT INTO case_emails (gs_request_id, staff_id, recipient, sender, subject, body, delivery_status) VALUES (?,?,?,?,?,?,'sending')"
+    );
+    $stmt->execute([$gsRequestId, $staffId, $recipient, $senderEmail, $subject, $body]);
+    $logId = (int) $pdo->lastInsertId();
+
     try {
         $messageId = send_transactional_email($recipient, $recipientName, $subject, $body, $senderEmail);
-        $pdo->prepare(
-            'INSERT INTO case_emails (gs_request_id, staff_id, recipient, sender, subject, body, brevo_message_id, delivery_status) VALUES (?,?,?,?,?,?,?,?)'
-        )->execute([$gsRequestId, $staffId, $recipient, $senderEmail, $subject, $body, $messageId, 'sent']);
-        return true;
-    } catch (MailException $e) {
-        $pdo->prepare(
-            'INSERT INTO case_emails (gs_request_id, staff_id, recipient, sender, subject, body, brevo_message_id, delivery_status) VALUES (?,?,?,?,?,?,?,?)'
-        )->execute([$gsRequestId, $staffId, $recipient, $senderEmail, $subject, $body, null, 'failed']);
+    } catch (Throwable $e) {
+        // Any failure *before or during* the send (not just MailException: a curl or runtime
+        // error too) means nothing went out.
+        error_log("[mailer] case email to {$recipient} (GS-{$gsRequestId}) failed: " . $e->getMessage());
+        try {
+            $pdo->prepare("UPDATE case_emails SET delivery_status = 'failed' WHERE id = ?")->execute([$logId]);
+        } catch (Throwable $logError) {
+            error_log("[mailer] could not mark case_emails #{$logId} failed: " . $logError->getMessage());
+        }
         return false;
     }
+
+    // The email has gone out. Failing to record that must not surface as an error (staff
+    // would see a 500 and re-send, mailing the owner twice) - the row stays 'sending' and
+    // the problem is logged instead.
+    try {
+        $pdo->prepare("UPDATE case_emails SET delivery_status = 'sent', brevo_message_id = ? WHERE id = ?")->execute([$messageId, $logId]);
+    } catch (Throwable $e) {
+        error_log("[mailer] case email #{$logId} to {$recipient} WAS SENT but its log row could not be updated: " . $e->getMessage());
+    }
+    return true;
 }

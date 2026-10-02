@@ -17,6 +17,13 @@ final class TestEnv {
     public string $logPath = '';
     public string $dryRunEmailsPath;
     public array $shared = [];
+    // True when the suite runs against a throwaway MySQL/MariaDB database instead of SQLite — set
+    // KURONYX_TEST_MYSQL="host=127.0.0.1;port=3306;user=root;pass=secret" (the user needs CREATE/DROP
+    // DATABASE). The suite creates its own kuronyx_test_* database and drops it afterwards.
+    public bool $isMysql = false;
+    public string $iniPath = '';
+    public array $mysql = [];
+    public string $mysqlDbName = '';
 
     private int $port;
     private string $configPath;
@@ -35,6 +42,13 @@ final class TestEnv {
         $this->cookieJarAnon  = $this->tmpDir . '/cookies-anon.txt';
         $this->dryRunEmailsPath = $this->tmpDir . '/dry-run-emails.jsonl';
         $this->configPath = $projectRoot . '/public_html/includes/db-config.php';
+        $dsn = (string) getenv('KURONYX_TEST_MYSQL');
+        if ($dsn !== '') {
+            parse_str(str_replace(';', '&', $dsn), $this->mysql);
+            $this->mysql += ['host' => '127.0.0.1', 'port' => '3306', 'user' => 'root', 'pass' => ''];
+            $this->isMysql = true;
+            $this->mysqlDbName = 'kuronyx_test_' . bin2hex(random_bytes(4));
+        }
 
         mkdir($this->tmpDir, 0777, true);
         mkdir($this->storageDir, 0777, true);
@@ -42,16 +56,26 @@ final class TestEnv {
     }
 
     public function setUp(): void {
+        // setup.php is kept out of public_html (see tools/setup.php) so it is never deployed; the
+        // setup tests need it served, so it is copied in for the duration of the run.
+        copy($this->root . '/tools/setup.php', $this->root . '/public_html/admin/setup.php');
         if (file_exists($this->configPath)) {
             $this->configBackup = file_get_contents($this->configPath);
         }
         $config = "<?php\n"
             . "if (basename(\$_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) { http_response_code(403); exit('Forbidden.'); }\n"
-            . "define('DB_DRIVER', 'sqlite');\n"
-            . "define('DB_HOST', '');\n"
-            . "define('DB_NAME', " . var_export($this->dbPath, true) . ");\n"
-            . "define('DB_USER', '');\n"
-            . "define('DB_PASS', '');\n"
+            . ($this->isMysql
+                ? "define('DB_DRIVER', 'mysql');\n"
+                  . "define('DB_HOST', " . var_export($this->mysql['host'], true) . ");\n"
+                  . "define('DB_PORT', " . (int) $this->mysql['port'] . ");\n"
+                  . "define('DB_NAME', " . var_export($this->mysqlDbName, true) . ");\n"
+                  . "define('DB_USER', " . var_export($this->mysql['user'], true) . ");\n"
+                  . "define('DB_PASS', " . var_export($this->mysql['pass'], true) . ");\n"
+                : "define('DB_DRIVER', 'sqlite');\n"
+                  . "define('DB_HOST', '');\n"
+                  . "define('DB_NAME', " . var_export($this->dbPath, true) . ");\n"
+                  . "define('DB_USER', '');\n"
+                  . "define('DB_PASS', '');\n")
             . "define('PRIVATE_STORAGE_PATH', " . var_export($this->storageDir, true) . ");\n"
             . "define('SETUP_TOKEN', 'test-setup-token');\n"
             . "define('BREVO_API_KEY', 'test-key-not-real');\n"
@@ -67,12 +91,36 @@ final class TestEnv {
             . "define('EMAIL_DRY_RUN_LOG', " . var_export($this->dryRunEmailsPath, true) . ");\n";
         file_put_contents($this->configPath, $config);
 
-        $pdo = new PDO('sqlite:' . $this->dbPath);
-        $pdo->exec('PRAGMA foreign_keys = ON');
-        $pdo->exec(file_get_contents($this->root . '/db/schema.sqlite.sql'));
-        $pdo = null;
+        if ($this->isMysql) {
+            $this->createMysqlDatabase();
+        } else {
+            $pdo = new PDO('sqlite:' . $this->dbPath);
+            $pdo->exec('PRAGMA foreign_keys = ON');
+            $pdo->exec(file_get_contents($this->root . '/db/schema.sqlite.sql'));
+            $pdo = null;
+        }
 
         $this->startServer();
+    }
+
+    private function mysqlServerPdo(?string $db = null): PDO {
+        $dsn = 'mysql:host=' . $this->mysql['host'] . ';port=' . (int) $this->mysql['port'] . ($db !== null ? ';dbname=' . $db : '') . ';charset=utf8mb4';
+        $pdo = new PDO($dsn, $this->mysql['user'], $this->mysql['pass']);
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
+        return $pdo;
+    }
+
+    private function createMysqlDatabase(): void {
+        require_once __DIR__ . '/schema.php';
+        $server = $this->mysqlServerPdo();
+        $server->exec('CREATE DATABASE ' . $this->mysqlDbName . ' CHARACTER SET utf8mb4');
+        $db = $this->mysqlServerPdo($this->mysqlDbName);
+        // The real production schema, statement by statement (comments stripped first so a
+        // semicolon inside one can't split a statement).
+        foreach (array_filter(array_map('trim', explode(";\n", str_replace("\r\n", "\n", schema_strip_comments(file_get_contents($this->root . '/db/schema.sql')))))) as $stmt) {
+            $db->exec($stmt);
+        }
     }
 
     private function extensionDir(): string {
@@ -91,6 +139,7 @@ final class TestEnv {
         $iniPath = $this->tmpDir . '/php.ini';
         $ini = 'extension_dir = "' . $this->extensionDir() . "\"\n"
              . "extension=pdo_sqlite\n"
+             . "extension=pdo_mysql\n"
              . "extension=fileinfo\n"
              . "extension=mbstring\n"
              . "display_errors = On\n"
@@ -100,6 +149,7 @@ final class TestEnv {
              . "upload_max_filesize = 12M\n"
              . "post_max_size = 12M\n";
         file_put_contents($iniPath, $ini);
+        $this->iniPath = $iniPath;
 
         $this->logPath = $this->tmpDir . '/server.log';
         $cmd = ['php', '-c', $iniPath, '-S', "127.0.0.1:{$this->port}", '-t', $this->root . '/public_html'];
@@ -122,6 +172,9 @@ final class TestEnv {
     }
 
     public function pdo(): PDO {
+        if ($this->isMysql) {
+            return $this->mysqlServerPdo($this->mysqlDbName);
+        }
         $pdo = new PDO('sqlite:' . $this->dbPath);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $pdo->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
@@ -171,10 +224,20 @@ final class TestEnv {
             }
         }
 
+        @unlink($this->root . '/public_html/admin/setup.php');
+
         if ($this->configBackup !== null) {
             file_put_contents($this->configPath, $this->configBackup);
         } elseif (file_exists($this->configPath)) {
             unlink($this->configPath);
+        }
+
+        if ($this->isMysql) {
+            try {
+                $this->mysqlServerPdo()->exec('DROP DATABASE IF EXISTS ' . $this->mysqlDbName);
+            } catch (Throwable $e) {
+                echo "Could not drop {$this->mysqlDbName}: " . $e->getMessage() . "\n";
+            }
         }
 
         $this->rrmdir($this->tmpDir);

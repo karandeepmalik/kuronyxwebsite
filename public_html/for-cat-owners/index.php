@@ -2,20 +2,39 @@
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
 require __DIR__ . '/../includes/upload.php';
+require __DIR__ . '/../includes/data-protection.php';
 
 // Must run before any HTML output so the session cookie ships with the first
 // response headers — csrf_field() alone (called later, inside the template)
 // is too late and silently breaks CSRF verification on every submission.
 csrf_token();
 
-$errors = [];
-$old    = $_POST ?? [];
+$errors  = [];
+$old     = $_POST ?? [];
+$rateHit = null;
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $errors['_form'] = 'Your session expired. Please review and submit the form again.';
-    } elseif (rate_limited('cat_owner_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 8, 60)) {
+    } elseif (!empty($_POST['website_url'])) {
+        // Honeypot: this field is invisible to people (see the form) but bots that fill in
+        // every input fill it in too. Pretend it worked so a script gets no signal to adapt to.
+        header('Location: /request-received');
+        exit;
+    } elseif (($rateHit = rate_limit_reserve('cat_owner_submit:' . client_ip(), 8, 60)) === null) {
+        // The hit is reserved here but handed back below if the submission is bounced for
+        // ordinary field errors, so only completed (or abusive) submissions use up the 8/hour.
         $errors['_form'] = 'Too many submissions from this connection. Please try again later.';
+    } elseif (!consume_one_time_token('cat_owner_submit')) {
+        // A double-click or an F5 resubmitting the same POST has exactly this shape — the
+        // token embedded in that original form render was already consumed by whichever
+        // submission got here first, so a second one can't also create a duplicate case.
+        // Validation failures below re-render the form with a fresh token (one_time_field()
+        // is called again on every render), so correcting a field and resubmitting still
+        // works normally — only an exact resubmission of an already-used render is blocked.
+        $errors['_form'] = 'This form was already submitted. If you need to submit again, please reload the page first.';
+    } elseif (!captcha_verify()) {
+        $errors['_form'] = 'Please complete the verification check and submit again.';
     } else {
         $fields = [
             'owner_full_name' => trim($_POST['owner_full_name'] ?? ''),
@@ -56,6 +75,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[$key] = 'Required';
             }
         }
+        // Column-size and format checks up front — without them an over-long value reaches the
+        // INSERT, where MySQL throws (a 500 that loses the visitor's whole submission and
+        // uploads) or, in non-strict mode, silently truncates it; and patient_sex only
+        // survived because the DB's own ENUM/CHECK rejected anything else.
+        foreach (field_length_errors($fields, [
+            'owner_full_name' => 150, 'owner_email' => 190, 'owner_phone' => 30, 'owner_address' => 255,
+            'owner_city' => 100, 'owner_state' => 100, 'owner_pin' => 20, 'owner_country' => 100,
+            'patient_name' => 100, 'patient_breed' => 100, 'patient_microchip' => 100, 'clinical_notes' => 20000,
+            'vet_name' => 150, 'vet_clinic' => 190, 'vet_email' => 190, 'vet_phone' => 30, 'vet_registration_info' => 190,
+        ]) as $key) {
+            $errors[$key] = 'Too long';
+        }
+        foreach (text_byte_errors($fields, ['clinical_notes']) as $key) {
+            $errors[$key] = 'Too long'; // TEXT column: the limit is in bytes, not characters
+        }
+        if (!in_array($fields['patient_sex'], ['male', 'female', 'unknown'], true)) {
+            $errors['patient_sex'] = 'Select a valid option';
+        }
+        foreach (['owner_phone', 'vet_phone'] as $phoneKey) {
+            if (isset($fields[$phoneKey]) && $fields[$phoneKey] !== '' && !preg_match('/^[0-9+()\-\s.]{5,30}$/', $fields[$phoneKey])) {
+                $errors[$phoneKey] = 'Enter a valid phone number';
+            }
+        }
         if ($fields['owner_email'] !== '' && !filter_var($fields['owner_email'], FILTER_VALIDATE_EMAIL)) {
             $errors['owner_email'] = 'Enter a valid email address';
         }
@@ -83,10 +125,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $weight = null;
         if ($fields['patient_weight_kg'] !== '') {
-            if (is_numeric($fields['patient_weight_kg']) && (float) $fields['patient_weight_kg'] > 0) {
-                $weight = (float) $fields['patient_weight_kg'];
-            } else {
-                $errors['patient_weight_kg'] = 'Enter a valid weight';
+            $weight = parse_patient_weight($fields['patient_weight_kg']);
+            if ($weight === null) {
+                $errors['patient_weight_kg'] = 'Enter a valid weight (up to 999.99 kg)';
             }
         }
 
@@ -117,6 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!empty($errors) && empty($errors['_form'])) {
             $errors['_form'] = 'Please check the highlighted fields below and try again.';
+            rate_limit_release($rateHit); // a typo being corrected isn't a submission
         }
 
         if (empty($errors)) {
@@ -167,13 +209,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      VALUES (?,?,?,?,?)'
                 );
                 $consentStmt->execute([
-                    $requestId, 'case_processing', 'privacy-policy-2026-07-18',
-                    $_SERVER['REMOTE_ADDR'] ?? null, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+                    $requestId, 'case_processing', privacy_policy_version(),
+                    client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
                 ]);
                 if (!empty($_POST['marketing_consent'])) {
                     $consentStmt->execute([
-                        $requestId, 'marketing', 'privacy-policy-2026-07-18',
-                        $_SERVER['REMOTE_ADDR'] ?? null, substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
+                        $requestId, 'marketing', privacy_policy_version(),
+                        client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255),
                     ]);
                 }
 
@@ -182,6 +224,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                      VALUES (?, NULL, \'submitted\', NULL, \'Case submitted by cat owner\')'
                 );
                 $historyStmt->execute([$requestId]);
+
+                // Audited *inside* the transaction, before it commits — auditing
+                // afterward meant that if audit()'s own INSERT ever failed, it would throw
+                // uncaught (no transaction left to roll back to at that point), surfacing
+                // as an opaque 500 for a submission that had actually already succeeded —
+                // which a visitor, seeing an error, would very plausibly just resubmit,
+                // creating a genuine duplicate case.
+                audit('case_submitted', 'gs_request', $requestId, [
+                    'source'         => 'cat_owner',
+                    'source_ip'      => client_ip(),
+                    'consent_given'  => true,
+                ], 'public');
 
                 $pdo->commit();
             } catch (Throwable $e) {
@@ -202,11 +256,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($errors)) {
-                audit('case_submitted', 'gs_request', $requestId, [
-                    'source'         => 'cat_owner',
-                    'source_ip'      => $_SERVER['REMOTE_ADDR'] ?? null,
-                    'consent_given'  => true,
-                ], 'public');
                 gs_session_start();
                 $_SESSION['gs_request_received'] = 'case';
                 header('Location: /request-received');
@@ -259,6 +308,10 @@ function ov(array $old, string $key): string {
 
     <form method="POST" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
+      <div style="position:absolute; left:-10000px; width:1px; height:1px; overflow:hidden;" aria-hidden="true">
+        <label>Leave this empty <input type="text" name="website_url" value="" tabindex="-1" autocomplete="off"></label>
+      </div>
+      <?= one_time_field('cat_owner_submit') ?>
 
       <fieldset>
         <legend>Owner information</legend>
@@ -423,6 +476,7 @@ function ov(array $old, string $key): string {
         <label for="marketing_consent">I'd also like to receive occasional updates from Kuronyx by email (optional).</label>
       </div>
 
+      <?= captcha_widget() ?>
       <button type="submit" class="btn-primary">Submit Request</button>
     </form>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

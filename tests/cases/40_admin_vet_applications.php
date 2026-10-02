@@ -22,6 +22,36 @@ return function (TestEnv $env): void {
         $env->shared['vetApplicationId'] = $id;
     });
 
+    run_test('adding a note appends to internal_notes via the database, not a stale in-PHP snapshot', function () use ($env) {
+        // Regression test for the internal_notes lost-write race: applyNote() used to read
+        // internal_notes into PHP at the top of the request, append in PHP, and write the
+        // whole thing back — so a concurrent change to the row (simulated here via a raw
+        // SQL write between this test's GET and its POST, standing in for a second staff
+        // member's action landing in between) would be silently discarded once this
+        // request's own stale read overwrote it. The fix appends via the database's own
+        // CONCAT/|| inside the UPDATE itself, so it can't lose a write no matter what
+        // changed the row in between.
+        $id = $env->shared['vetApplicationId'];
+        $jar = $env->cookieJarStaff;
+        $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($view['body']);
+
+        // String concatenation differs by engine: || is concatenation in SQLite but logical OR in MySQL.
+        $concat = $env->isMysql ? "CONCAT(COALESCE(internal_notes, ''), ?)" : "COALESCE(internal_notes, '') || ?";
+        $env->pdo()->prepare("UPDATE vet_applications SET internal_notes = {$concat} WHERE id = ?")
+            ->execute(["\n[concurrent] Someone else's note landed first.", $id]);
+
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'action' => 'add_note', 'note' => 'This note must not erase the concurrent one above it.'],
+        ]);
+        assert_contains('Note added', $post['body']);
+
+        $notes = (string) $env->scalar('SELECT internal_notes FROM vet_applications WHERE id = ?', [$id]);
+        assert_contains("Someone else's note landed first", $notes, 'the concurrently-written note must still be present');
+        assert_contains('This note must not erase the concurrent one above it', $notes, 'this request\'s own note must also be present');
+    });
+
     run_test('pharmacy_staff can review applications but is blocked from the admin-only audit log', function () use ($env) {
         // Seed a pharmacy_staff account directly — there is no self-serve staff
         // creation yet (that's part of a later build phase). Use a throwaway PDO

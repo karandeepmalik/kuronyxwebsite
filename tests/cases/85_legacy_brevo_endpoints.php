@@ -31,6 +31,17 @@ return function (TestEnv $env): void {
         assert_contains('Ignored non-delivered event', $r['body']);
     });
 
+    run_test('webhook.php does not subscribe recipients of non-welcome (transactional) emails', function () use ($env) {
+        foreach ([['template_id' => 99], []] as $extra) { // another template, and a non-template send (no id at all)
+            $r = http_request('POST', $env->baseUrl . '/php/webhook.php?secret=test-webhook-secret-not-real', [
+                'headers' => ['Content-Type: application/json'],
+                'body' => json_encode(['event' => 'delivered', 'email' => 'owner@example.test'] + $extra),
+            ]);
+            assert_equal(200, $r['status']);
+            assert_contains('not a newsletter welcome email', $r['body']);
+        }
+    });
+
     run_test('webhook.log is no longer written under the web-accessible php/ folder', function () use ($env) {
         // A 'delivered' + valid-secret request would reach the real Brevo API (skipped
         // here — see file header), but the two calls above already appended log lines;
@@ -83,66 +94,87 @@ return function (TestEnv $env): void {
         assert_equal(429, $sixth['status'], 'the 6th request within the window should be rate-limited');
     });
 
-    // Every request in this suite comes from the same test-runner IP, and other test
-    // files already submit to (and, after this one, still need to submit to) these same
-    // public forms — so rather than assuming how many hits are "left" in the 8/hour
-    // budget, read the current count and submit exactly enough more to cross it, then
-    // clear this bucket's rows afterward so later tests in other files aren't left
-    // artificially rate-limited by what this test did.
-    $exhaustRateLimit = function (TestEnv $env, string $bucket, string $url, string $csrf, string $jar) {
-        $remaining = 8 - (int) $env->scalar('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ?', [$bucket]);
-        assert_true($remaining > 0, 'expected some rate-limit budget left to exhaust for this bucket');
-        for ($i = 0; $i < $remaining; $i++) {
-            $r = http_request('POST', $env->baseUrl . $url, ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
-            assert_true(strpos($r['body'], 'Too many submissions') === false, "attempt {$i} should not be rate-limited yet");
-        }
-        $blocked = http_request('POST', $env->baseUrl . $url, ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
-        (function () use ($env, $bucket) {
-            $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
-        })();
-        return $blocked;
+    // The intake forms reserve a rate-limit hit up front and hand it back when a submission is
+    // bounced for ordinary field errors (rate_limit_reserve()/rate_limit_release()), so blank-field
+    // POSTs no longer fill the bucket. Fill it directly instead, then check the next POST is refused,
+    // and clear this bucket's rows afterward so later tests aren't left rate-limited.
+    $fillBucket = function (TestEnv $env, string $bucket, int $rows) {
+        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
+        $ins = $env->pdo()->prepare('INSERT INTO rate_limit_hits (bucket) VALUES (?)');
+        for ($i = 0; $i < $rows; $i++) $ins->execute([$bucket]);
     };
 
-    run_test('the cat-owner public form rate-limits repeated submissions from the same IP', function () use ($env, $exhaustRateLimit) {
+    run_test('the cat-owner public form rate-limits repeated submissions from the same IP', function () use ($env, $fillBucket) {
         $jar = $env->tmpDir . '/cookies-ratelimit-catowner.txt';
         $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
-        // Deliberately blank required fields so each attempt fails fast on validation
-        // rather than actually creating gs_requests rows.
-        $last = $exhaustRateLimit($env, 'cat_owner_submit:127.0.0.1', '/for-cat-owners/index.php', $csrf, $jar);
-        assert_contains('Too many submissions', $last['body']);
+        $fillBucket($env, 'cat_owner_submit:127.0.0.1', 8);
+        $blocked = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
+        $count = (int) $env->scalar('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ?', ['cat_owner_submit:127.0.0.1']);
+        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute(['cat_owner_submit:127.0.0.1']);
+        assert_contains('Too many submissions', $blocked['body']);
+        assert_equal(8, $count, 'a blocked attempt is not itself recorded');
     });
 
-    run_test('the vet-apply public form rate-limits repeated submissions from the same IP', function () use ($env, $exhaustRateLimit) {
+    run_test('the vet-apply public form rate-limits repeated submissions from the same IP', function () use ($env, $fillBucket) {
         $jar = $env->tmpDir . '/cookies-ratelimit-vetapply.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
-        $last = $exhaustRateLimit($env, 'vet_apply_submit:127.0.0.1', '/for-veterinarians/apply/index.php', $csrf, $jar);
-        assert_contains('Too many submissions', $last['body']);
+        $fillBucket($env, 'vet_apply_submit:127.0.0.1', 8);
+        $blocked = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
+        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute(['vet_apply_submit:127.0.0.1']);
+        assert_contains('Too many submissions', $blocked['body']);
     });
 
-    run_test('a blocked (rate-limited) request still records its own hit', function () use ($env) {
-        // rate_limited() used to be a check-then-act split: the caller only called
-        // record_rate_limit_hit() in the success branch, so a request that got blocked
-        // never added a row — meaning a burst of concurrent requests could all read the
-        // count before any of them recorded a hit, and all slip through. The fix records
-        // every attempt unconditionally, including ones that end up rejected, so a bucket
-        // that has just rejected a request should show maxHits + 1 rows, not maxHits.
-        $bucket = 'cat_owner_submit:127.0.0.1';
-        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
-
-        $jar = $env->tmpDir . '/cookies-ratelimit-hitcount.txt';
-        $get = http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar]);
-        $csrf = extract_csrf($get['body']);
-        for ($i = 0; $i < 8; $i++) {
-            http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
+    run_test('field-validation failures on the intake forms do not use up the hourly submission allowance', function () use ($env) {
+        foreach ([['/for-cat-owners/index.php', 'cat_owner_submit:127.0.0.1'], ['/for-veterinarians/apply/index.php', 'vet_apply_submit:127.0.0.1']] as [$url, $bucket]) {
+            $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
+            $jar = $env->tmpDir . '/cookies-ratelimit-release.txt';
+            @unlink($jar);
+            $get = http_request('GET', $env->baseUrl . $url, ['cookie_jar' => $jar]);
+            $csrf = extract_csrf($get['body']);
+            // 12 blank-field submissions: well past the 8/hour budget if each counted.
+            for ($i = 0; $i < 12; $i++) {
+                $r = http_request('POST', $env->baseUrl . $url, ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf, 'ott' => extract_ott($get['body'])]]);
+                assert_true(strpos($r['body'], 'Too many submissions') === false, "{$url}: blank submission {$i} must not be rate-limited");
+                assert_contains('Please check the highlighted fields', $r['body']);
+                $get = $r; // the re-render carries the fresh one-time token
+            }
+            assert_equal(0, (int) $env->scalar('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ?', [$bucket]), "{$url}: field errors hand their reserved hit back");
         }
-        $blocked = http_request('POST', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf]]);
-        assert_contains('Too many submissions', $blocked['body']);
+    });
+    run_test('the legacy endpoints no longer accept localhost origins, and enforce honeypot + length caps', function () use ($env) {
+        $clear = function () use ($env) {
+            $env->pdo()->exec("DELETE FROM rate_limit_hits WHERE bucket IN ('send_enquiry:127.0.0.1','send_welcome:127.0.0.1')");
+        };
+        $clear();
+        $good = ['name' => 'X', 'clinic' => 'Y', 'city' => 'Z', 'email' => 'x@example.test', 'phone' => '12345', 'message' => 'hi'];
 
-        $hits = (int) $env->scalar('SELECT COUNT(*) FROM rate_limit_hits WHERE bucket = ?', [$bucket]);
-        assert_equal(9, $hits, 'the blocked 9th attempt should itself have been recorded, not skipped');
+        $r = http_request('POST', $env->baseUrl . '/php/send-enquiry.php', [
+            'headers' => ['Origin: http://localhost:8000', 'Content-Type: application/json'], 'body' => json_encode($good),
+        ]);
+        assert_equal(403, $r['status'], 'localhost is not a production origin');
 
-        $env->pdo()->prepare('DELETE FROM rate_limit_hits WHERE bucket = ?')->execute([$bucket]);
+        $h = ['Origin: https://kuronyx.in', 'Content-Type: application/json'];
+        $r = http_request('POST', $env->baseUrl . '/php/send-enquiry.php', ['headers' => $h, 'body' => json_encode($good + ['bot-field' => 'spam'])]);
+        assert_equal(200, $r['status']);
+        assert_contains('"success":true', $r['body']);
+
+        $r = http_request('POST', $env->baseUrl . '/php/send-enquiry.php', ['headers' => $h, 'body' => json_encode(['message' => str_repeat('a', 5001)] + $good)]);
+        assert_equal(400, $r['status'], 'an over-long message must be rejected before reaching Brevo');
+        assert_contains('too long', $r['body']);
+
+        $r = http_request('POST', $env->baseUrl . '/php/send-enquiry.php', ['headers' => $h, 'body' => json_encode(['name' => ['array']] + $good)]);
+        assert_equal(400, $r['status'], 'a non-string field is a validation error, not a 500');
+
+        $r = http_request('POST', $env->baseUrl . '/php/send-welcome.php', ['headers' => $h, 'body' => json_encode(['email' => 'a@example.test', 'bot-field' => 'spam'])]);
+        assert_equal(200, $r['status']);
+        $clear();
+    });
+
+    run_test('captcha-config.php reports no site key when Turnstile is not configured', function () use ($env) {
+        $r = http_request('GET', $env->baseUrl . '/php/captcha-config.php');
+        assert_equal(200, $r['status']);
+        assert_equal('{}', trim($r['body']));
     });
 };

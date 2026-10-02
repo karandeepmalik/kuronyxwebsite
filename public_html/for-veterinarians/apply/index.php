@@ -2,6 +2,7 @@
 require __DIR__ . '/../../includes/db.php';
 require __DIR__ . '/../../includes/auth.php';
 require __DIR__ . '/../../includes/upload.php';
+require __DIR__ . '/../../includes/data-protection.php';
 
 // Must run before any HTML output so the session cookie ships with the first
 // response headers — csrf_field() alone (called later, inside the template)
@@ -10,13 +11,26 @@ csrf_token();
 
 $errors  = [];
 $success = false;
+$rateHit = null;
 $old     = $_POST ?? [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $errors['_form'] = 'Your session expired. Please review and submit the form again.';
-    } elseif (rate_limited('vet_apply_submit:' . ($_SERVER['REMOTE_ADDR'] ?? 'unknown'), 8, 60)) {
+    } elseif (!empty($_POST['website_url'])) {
+        // Honeypot: this field is invisible to people (see the form) but bots that fill in
+        // every input fill it in too. Pretend it worked so a script gets no signal to adapt to.
+        header('Location: /request-received');
+        exit;
+    } elseif (($rateHit = rate_limit_reserve('vet_apply_submit:' . client_ip(), 8, 60)) === null) {
+        // Reserved here, handed back below if the submission is bounced for ordinary field errors.
         $errors['_form'] = 'Too many submissions from this connection. Please try again later.';
+    } elseif (!consume_one_time_token('vet_apply_submit')) {
+        // See for-cat-owners/index.php's identical guard — a double-click or an F5
+        // resubmitting the same POST must not create a second application.
+        $errors['_form'] = 'This form was already submitted. If you need to submit again, please reload the page first.';
+    } elseif (!captcha_verify()) {
+        $errors['_form'] = 'Please complete the verification check and submit again.';
     } else {
         $fields = [
             'full_name'            => trim($_POST['full_name'] ?? ''),
@@ -49,6 +63,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $errors[$key] = 'Required';
             }
         }
+        // See for-cat-owners/index.php — column-size and format checks before the INSERT.
+        foreach (field_length_errors($fields, [
+            'full_name' => 150, 'professional_email' => 190, 'mobile' => 30, 'registration_number' => 100,
+            'registration_state' => 100, 'registration_country' => 100, 'qualification' => 150, 'practice_type' => 100,
+            'clinic_name' => 190, 'clinic_address' => 255, 'clinic_city' => 100, 'clinic_state' => 100,
+            'clinic_pin' => 20, 'clinic_country' => 100, 'clinic_phone' => 30, 'clinic_email' => 190, 'clinic_website' => 255,
+        ]) as $key) {
+            $errors[$key] = 'Too long';
+        }
+        foreach (['mobile', 'clinic_phone'] as $phoneKey) {
+            if ($fields[$phoneKey] !== '' && !preg_match('/^[0-9+()\-\s.]{5,30}$/', $fields[$phoneKey])) {
+                $errors[$phoneKey] = 'Enter a valid phone number';
+            }
+        }
+        if ($fields['clinic_website'] !== '' && !filter_var($fields['clinic_website'], FILTER_VALIDATE_URL)) {
+            $errors['clinic_website'] = 'Enter a valid URL';
+        }
         if ($fields['professional_email'] !== '' && !filter_var($fields['professional_email'], FILTER_VALIDATE_EMAIL)) {
             $errors['professional_email'] = 'Enter a valid email address';
         }
@@ -61,6 +92,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         if (empty($_POST['consent'])) {
             $errors['consent'] = 'Consent is required to submit this application';
+        }
+
+        // The registration certificate is what staff verify the registration number against before
+        // approving (see docs/vet-approval-checklist.md), so an application without one can't be reviewed.
+        if (empty($_FILES['registration_certificate']['name'])) {
+            $errors['registration_certificate'] = 'Required';
         }
 
         $uploads = [];
@@ -86,6 +123,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (!empty($errors) && empty($errors['_form'])) {
             $errors['_form'] = 'Please check the highlighted fields below and try again.';
+            rate_limit_release($rateHit); // a typo being corrected isn't a submission
         }
 
         if (empty($errors)) {
@@ -125,7 +163,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                // consent_records is scoped to gs_requests (case consent); application consent is captured in audit_log below.
+                // consent_records is scoped to gs_requests (case consent); application
+                // consent is captured in the audit entry below, which — like
+                // for-cat-owners/index.php's own submission — runs *inside* the
+                // transaction, before it commits. Auditing afterward meant that if
+                // audit()'s own INSERT ever failed, it would throw uncaught, surfacing as
+                // an opaque 500 for a submission that had actually already succeeded —
+                // which an applicant, seeing an error, would plausibly just resubmit.
+                audit('application_submitted', 'vet_application', $applicationId, [
+                    'source_ip'      => client_ip(),
+                    'consent_given'  => true,
+                    'consent_version' => privacy_policy_version(),
+                ], 'public');
                 $pdo->commit();
             } catch (Throwable $e) {
                 $pdo->rollBack();
@@ -144,11 +193,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($errors)) {
-                audit('application_submitted', 'vet_application', $applicationId, [
-                    'source_ip'      => $_SERVER['REMOTE_ADDR'] ?? null,
-                    'consent_given'  => true,
-                    'consent_version' => 'privacy-policy-2026-07-18',
-                ], 'public');
                 gs_session_start();
                 $_SESSION['gs_request_received'] = 'vet_application';
                 header('Location: /request-received');
@@ -189,6 +233,10 @@ function old_val(array $old, string $key): string {
 
     <form method="POST" enctype="multipart/form-data" novalidate>
       <?= csrf_field() ?>
+      <div style="position:absolute; left:-10000px; width:1px; height:1px; overflow:hidden;" aria-hidden="true">
+        <label>Leave this empty <input type="text" name="website_url" value="" tabindex="-1" autocomplete="off"></label>
+      </div>
+      <?= one_time_field('vet_apply_submit') ?>
 
       <fieldset>
         <legend>Veterinarian</legend>
@@ -293,9 +341,9 @@ function old_val(array $old, string $key): string {
         <legend>Verification documents (optional)</legend>
         <p class="field-hint" style="margin-bottom:1rem;">PDF, JPG or PNG, up to 10MB each. These help us verify your registration faster but are not required to submit an application.</p>
         <div class="field-row two">
-          <label class="field">
-            <span class="lbl">Veterinary registration certificate</span>
-            <input type="file" name="registration_certificate" accept=".pdf,.jpg,.jpeg,.png">
+          <label class="field <?= isset($errors['registration_certificate']) ? 'has-error' : '' ?>">
+            <span class="lbl">Veterinary registration certificate (required)</span>
+            <input type="file" name="registration_certificate" accept=".pdf,.jpg,.jpeg,.png" required>
           </label>
           <label class="field">
             <span class="lbl">Professional ID</span>
@@ -313,6 +361,7 @@ function old_val(array $old, string $key): string {
         <label for="consent">I confirm that I am authorised to provide this information and consent to Kuronyx processing the information and documents submitted for verification, communication and related compliance requirements, in accordance with the <a href="/Privacy%20Policy.html" target="_blank" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Kuronyx Privacy Notice</a>.</label>
       </div>
 
+      <?= captcha_widget() ?>
       <button type="submit" class="btn-primary">Submit Application</button>
     </form>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

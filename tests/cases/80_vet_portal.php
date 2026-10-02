@@ -7,19 +7,22 @@ return function (TestEnv $env): void {
     });
 
     run_test('a new vet application can be approved into an activation email', function () use ($env) {
+        $pngPath = __DIR__ . '/../fixtures/tiny.png';
         $jar = $env->tmpDir . '/cookies-vetapply2.txt';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/apply/index.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/apply/index.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'full_name' => 'Dr. Portal Vet', 'professional_email' => 'portal.vet@example.test', 'mobile' => '9000000000',
                 'registration_number' => 'MH-VET-9999', 'registration_state' => 'Maharashtra', 'registration_country' => 'India',
                 'qualification' => 'BVSc & AH', 'year_qualified' => '2018', 'practice_type' => 'Independent practice',
                 'clinic_name' => 'Portal Vet Clinic', 'clinic_address' => '1 Clinic Rd', 'clinic_city' => 'Pune',
                 'clinic_state' => 'Maharashtra', 'clinic_pin' => '411002', 'clinic_country' => 'India', 'clinic_phone' => '02099999999',
                 'consent' => '1',
+                'registration_certificate' => new CURLFile($pngPath, 'image/png', 'cert.png'),
             ],
         ]);
         assert_equal(302, $post['status']);
@@ -53,10 +56,11 @@ return function (TestEnv $env): void {
         $link = $m[0];
 
         $csrf3 = extract_csrf($gen['body']);
+        $ott3  = extract_ott($gen['body']);
         $send = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
             'cookie_jar' => $jarStaff,
             'body' => [
-                'csrf_token' => $csrf3, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
+                'csrf_token' => $csrf3, 'ott' => $ott3, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
                 'recipient' => 'portal.vet@example.test', 'subject' => 'Your Kuronyx veterinary account is approved',
                 'body' => "Set your password to activate:\n{$link}\n\nReference: VA-{$appId}",
             ],
@@ -111,10 +115,11 @@ return function (TestEnv $env): void {
         $jar = $env->shared['vetPortalJar'];
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Portal Client', 'owner_email' => 'client@example.test', 'owner_phone' => '9111111111',
                 'owner_address' => '5 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
                 'patient_name' => 'Tom', 'requested_formulation' => 'oral', 'consent' => '1',
@@ -134,10 +139,11 @@ return function (TestEnv $env): void {
         $pngPath = __DIR__ . '/../fixtures/tiny.png';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Bad Date Client', 'owner_email' => 'baddateclient@example.test', 'owner_phone' => '9111111112',
                 'owner_address' => '6 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
                 'patient_name' => 'Rollover', 'patient_dob' => '2026-02-30', 'requested_formulation' => 'oral', 'consent' => '1',
@@ -168,10 +174,11 @@ return function (TestEnv $env): void {
         $jar = $env->shared['vetPortalJar'];
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Orphan Portal Client', 'owner_email' => 'orphanportal@example.test', 'owner_phone' => '9111111113',
                 'owner_address' => '7 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
                 'patient_name' => 'Orphan', 'requested_formulation' => 'oral', 'consent' => '1',
@@ -193,10 +200,11 @@ return function (TestEnv $env): void {
         $pngPath = __DIR__ . '/../fixtures/tiny.png';
         $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
+        $ott  = extract_ott($get['body']);
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf,
+                'csrf_token' => $csrf, 'ott' => $ott,
                 'owner_full_name' => 'Portal Client', 'owner_email' => 'client@example.test', 'owner_phone' => '9111111111',
                 'owner_address' => '5 Client Rd', 'owner_city' => 'Pune', 'owner_state' => 'Maharashtra', 'owner_pin' => '411003',
                 'patient_name' => 'Tom', 'requested_formulation' => 'oral', 'consent' => '1',
@@ -272,7 +280,8 @@ return function (TestEnv $env): void {
         assert_true($docId > 0, 'expected the prescription document from the earlier portal submission');
         $r = http_request('GET', $env->baseUrl . "/download.php?kind=gs_request&doc_id={$docId}", ['cookie_jar' => $env->shared['vetPortalJar']]);
         assert_equal(302, $r['status'], 'a suspended vet must be treated as logged out here too, not just on portal pages');
-        assert_contains('/admin/login.php', $r['location'] ?? '');
+        // bounced to the vet sign-in (they only hold a vet session cookie), not the staff one
+        assert_contains('/for-veterinarians/login.php', $r['location'] ?? '');
     });
 
     run_test('re-approving a suspended-but-already-activated application reactivates it directly, keeping the existing password', function () use ($env) {
@@ -302,7 +311,10 @@ return function (TestEnv $env): void {
         assert_contains('/for-veterinarians/portal/', $login['location'] ?? '');
     });
 
-    run_test('logging into one of staff/vet portal clears a lingering identity from the other (shared session cookie)', function () use ($env) {
+    run_test('staff and vet logins on one browser are fully independent (separate session cookies)', function () use ($env) {
+        // Each area has its own session cookie (see gs_session_area() in auth.php), so being
+        // signed in as staff and as a vet in the same browser no longer needs either login to
+        // clear the other — and signing out of one must not sign out of the other.
         // Re-activate a fresh vet account for this check (the portal.vet one above is now
         // suspended). Uses a throwaway PDO handle that closes immediately — see the note
         // in 40_admin_vet_applications.php about not holding one open across http_request().
@@ -313,17 +325,14 @@ return function (TestEnv $env): void {
 
         $jar = $env->tmpDir . '/cookies-shared-identity.txt';
 
-        // Log in as staff first.
         $get = http_request('GET', $env->baseUrl . '/admin/login.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
         http_request('POST', $env->baseUrl . '/admin/login.php', [
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'email' => 'admin@example.test', 'password' => 'correct horse battery staple'],
         ]);
-        $adminPage = http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar]);
-        assert_equal(200, $adminPage['status'], 'should be a valid staff session at this point');
+        assert_equal(200, http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar])['status'], 'should be a valid staff session at this point');
 
-        // Now log into the vet portal on the SAME cookie jar/session.
         $get2 = http_request('GET', $env->baseUrl . '/for-veterinarians/login.php', ['cookie_jar' => $jar]);
         $csrf2 = extract_csrf($get2['body']);
         http_request('POST', $env->baseUrl . '/for-veterinarians/login.php', [
@@ -331,13 +340,65 @@ return function (TestEnv $env): void {
             'body' => ['csrf_token' => $csrf2, 'email' => 'portal.vet@example.test', 'password' => 'reactivated-password-1'],
         ]);
 
-        // The staff identity should no longer work on this same cookie jar.
-        $adminAfter = http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar]);
-        assert_equal(302, $adminAfter['status'], 'staff session should have been cleared by the vet login');
-        assert_contains('/admin/login.php', $adminAfter['location'] ?? '');
+        assert_equal(200, http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar])['status'], 'the vet login must not disturb the staff session');
+        $portal = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/', ['cookie_jar' => $jar]);
+        assert_equal(200, $portal['status']);
 
-        // ...but the vet portal itself should still work.
-        $portalPage = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/', ['cookie_jar' => $jar]);
-        assert_equal(200, $portalPage['status']);
+        // Signing out of the vet portal leaves staff signed in.
+        http_request('POST', $env->baseUrl . '/for-veterinarians/portal/logout.php', ['cookie_jar' => $jar, 'body' => ['csrf_token' => extract_csrf($portal['body'])]]);
+        assert_equal(302, http_request('GET', $env->baseUrl . '/for-veterinarians/portal/', ['cookie_jar' => $jar])['status'], 'vet should be signed out');
+        assert_equal(200, http_request('GET', $env->baseUrl . '/admin/gs-requests/', ['cookie_jar' => $jar])['status'], 'staff should still be signed in');
+    });
+
+    run_test('the staff and vet session cookies have different names, and anonymous visitors get neither', function () use ($env) {
+        $anon = $env->tmpDir . '/cookies-anon-names.txt';
+        http_request('GET', $env->baseUrl . '/for-cat-owners/index.php', ['cookie_jar' => $anon]);
+        $jarText = (string) file_get_contents($anon);
+        assert_contains('kuronyx_sid', $jarText, 'a public form visitor gets the public session cookie');
+        assert_true(strpos($jarText, 'kuronyx_staff_sid') === false, 'an anonymous visitor must not be handed a staff-named session');
+        assert_true(strpos($jarText, 'kuronyx_vet_sid') === false);
+    });
+
+    run_test('require_vet_login() also blocks portal access when the linked application is not approved, even if the account row itself is still active', function () use ($env) {
+        // Regression test for a status-sync gap Copilot caught: the admin review actions
+        // (approve/reject/suspend) update vet_applications and vet_accounts as separate
+        // statements — now wrapped in a transaction together, but require_vet_login() (and
+        // download.php's own inline equivalent) also independently re-check the linked
+        // application's own status on every request, not just the account's, so portal
+        // access doesn't depend on that sync always holding (a future action that forgets
+        // to touch the account, a restored backup, etc.). This manufactures exactly that
+        // inconsistent state directly via SQL — account active, application NOT approved —
+        // to prove the gate itself catches it independently of how it got that way.
+        $appId = (int) $env->scalar("SELECT id FROM vet_applications WHERE professional_email = 'portal.vet@example.test'");
+        assert_equal('approved', $env->scalar('SELECT status FROM vet_applications WHERE id = ?', [$appId]), 'sanity check: application should be approved going into this test');
+        assert_equal('active', $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$appId]), 'sanity check: account should be active going into this test');
+
+        $env->pdo()->prepare("UPDATE vet_applications SET status = 'rejected' WHERE id = ?")->execute([$appId]);
+
+        $jar = $env->tmpDir . '/cookies-vetportal-app-mismatch.txt';
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/login.php', ['cookie_jar' => $jar]);
+        $csrf = extract_csrf($get['body']);
+        $login = http_request('POST', $env->baseUrl . '/for-veterinarians/login.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'email' => 'portal.vet@example.test', 'password' => 'reactivated-password-1'],
+        ]);
+        // login.php only checks the account row (status/password), so this still succeeds
+        // and sets the session — the portal-page gate is what must catch the mismatch next.
+        assert_equal(302, $login['status']);
+
+        $portal = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/', ['cookie_jar' => $jar]);
+        assert_equal(302, $portal['status'], 'portal access must be blocked when the linked application is no longer approved, even with an active account row');
+        assert_contains('/for-veterinarians/login.php', $portal['location'] ?? '');
+
+        // download.php has its own inline copy of this check — prove it independently too.
+        $docId = (int) $env->scalar(
+            "SELECT id FROM gs_request_documents WHERE gs_request_id = ? AND doc_type = 'prescription'",
+            [$env->shared['vetGsRequestId']]
+        );
+        $dl = http_request('GET', $env->baseUrl . "/download.php?kind=gs_request&doc_id={$docId}", ['cookie_jar' => $jar]);
+        assert_equal(302, $dl['status'], 'download.php must independently block this too, not just the portal pages');
+
+        // Restore, so later tests/files that use this same vet account aren't left broken.
+        $env->pdo()->prepare("UPDATE vet_applications SET status = 'approved' WHERE id = ?")->execute([$appId]);
     });
 };

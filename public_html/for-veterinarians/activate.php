@@ -4,6 +4,11 @@ require __DIR__ . '/../includes/auth.php';
 
 csrf_token();
 
+// The URL of this page carries a one-time token: keep it out of browser/proxy caches, and never send it
+// anywhere as a Referer.
+header('Cache-Control: no-store');
+header('Referrer-Policy: no-referrer');
+
 $pdo = db();
 $rawToken = trim($_GET['token'] ?? $_POST['token'] ?? '');
 $errors = [];
@@ -34,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
         $password = (string) ($_POST['password'] ?? '');
         $confirm  = (string) ($_POST['password_confirm'] ?? '');
         if (strlen($password) < 12) $errors['password'] = 'Use at least 12 characters';
+        elseif (strlen($password) > PASSWORD_MAX_BYTES) $errors['password'] = 'Use at most 72 characters';
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
@@ -50,7 +56,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
             );
             $stmt->execute([password_hash($password, PASSWORD_DEFAULT), $account['id'], hash('sha256', $rawToken), gmdate('Y-m-d H:i:s')]);
             if ($stmt->rowCount() > 0) {
-                audit('vet_account_activated', 'vet_account', (int) $account['id'], [], 'public');
+                audit('vet_account_activated', 'vet_account', (int) $account['id'], [], 'vet', (int) $account['id']);
                 $done = true;
             } else {
                 $account = null; // someone else already consumed this token, or the application status changed underneath us

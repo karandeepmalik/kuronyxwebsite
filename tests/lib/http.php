@@ -45,3 +45,14 @@ function extract_csrf(string $html): string {
     }
     return html_entity_decode($m[1], ENT_QUOTES);
 }
+
+// Extracts the one-time-token field (one_time_field() / consume_one_time_token() in
+// auth.php) a form embeds to guard against a double-click/resubmit actually firing an
+// external side effect (an email) twice. Unlike CSRF tokens, a given one-time token is
+// only ever valid for one submission — a fresh one is embedded on every render.
+function extract_ott(string $html): string {
+    if (!preg_match('/name="ott" value="([^"]+)"/', $html, $m)) {
+        throw new RuntimeException('ott field not found in response body');
+    }
+    return html_entity_decode($m[1], ENT_QUOTES);
+}

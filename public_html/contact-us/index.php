@@ -11,13 +11,9 @@ require __DIR__ . '/../includes/layout-header.php';
 
     <p class="lead">For veterinarians with a patient query or a prescription enquiry.</p>
 
-    <form class="contact-form" id="enquiryForm"
-          name="enquiry"
+    <form class="contact-form" id="enquiryForm" data-captcha
           method="POST"
-          data-netlify="true"
-          netlify-honeypot="bot-field"
           novalidate>
-      <input type="hidden" name="form-name" value="enquiry" />
       <p class="field-hint" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
 
       <div class="field-row two">
@@ -60,6 +56,7 @@ require __DIR__ . '/../includes/layout-header.php';
       Or write directly to <a href="mailto:hello@kuronyx.in" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">hello@kuronyx.in</a>.
     </p>
 
+<script src="/js/captcha.js"></script>
 <script>
 (function () {
   const enqForm   = document.getElementById('enquiryForm');
@@ -107,14 +104,12 @@ require __DIR__ . '/../includes/layout-header.php';
     try {
       const formData = new FormData(enqForm);
       const payload = {};
-      formData.forEach((v, k) => { if (k !== 'bot-field' && k !== 'form-name') payload[k] = v; });
+      formData.forEach((v, k) => { payload[k] = v; });
 
-      try {
-        const body = new URLSearchParams();
-        formData.forEach((v, k) => body.append(k, v));
-        fetch('/', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: body.toString() });
-      } catch (e) {}
-
+      if (window.KuronyxCaptcha && KuronyxCaptcha.enabled) {
+        payload['cf-turnstile-response'] = KuronyxCaptcha.token(enqForm);
+        if (!payload['cf-turnstile-response']) throw new Error('Please complete the verification check');
+      }
       const res = await fetch('/php/send-enquiry.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

@@ -19,7 +19,7 @@ require __DIR__ . '/../../includes/layout-header.php';
     <p class="doc-eyebrow">Veterinary portal · <?= htmlspecialchars($vet['full_name'], ENT_QUOTES) ?></p>
     <h1 class="doc-title">Your GS-441524 requests</h1>
     <p class="lead" style="margin-bottom:1.5rem;">
-      <a href="/for-veterinarians/portal/logout.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Sign out</a>
+      <form method="POST" action="/for-veterinarians/portal/logout.php" style="display:inline;"><?= csrf_field() ?><button type="submit" style="font:inherit; background:none; border:0; border-bottom:1px solid var(--paper-3); color:var(--paper); cursor:pointer; padding:0;">Sign out</button></form>
     </p>
 
     <a href="/for-veterinarians/portal/new-request.php" class="btn-primary" style="margin-bottom:1.75rem; display:inline-flex;">New Request</a>

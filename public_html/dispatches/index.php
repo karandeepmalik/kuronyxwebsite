@@ -23,7 +23,8 @@ require __DIR__ . '/../includes/layout-header.php';
 
     <div class="card-panel">
       <h2>Subscribe</h2>
-      <form id="subscribeForm">
+      <form id="subscribeForm" data-captcha>
+        <p hidden><label>Don't fill this out: <input name="bot-field" tabindex="-1" autocomplete="off"></label></p>
         <div class="field-row two">
           <label class="field" style="flex:1;">
             <span class="lbl">Email</span>
@@ -52,5 +53,6 @@ require __DIR__ . '/../includes/layout-header.php';
         </div>
       <?php endforeach; ?>
     </section>
+<script src="/js/captcha.js"></script>
 <script src="/js/subscribe.js"></script>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

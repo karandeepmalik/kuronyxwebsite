@@ -144,10 +144,12 @@ $backLabel       = $backLabel ?? 'Back to site';
   .admin-nav a{ color:var(--paper); text-decoration:none; padding:0.6rem 1rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); white-space:nowrap; transition:color .2s ease, border-color .2s ease, background .2s ease; }
   .admin-nav a:hover{ border-color:var(--teal); background:rgba(88,149,157,0.18); }
   .admin-nav a.active{ color:var(--navy); background:var(--teal); border-color:var(--teal); font-weight:500; }
-  .admin-nav .signout{ margin-left:auto; color:var(--paper-2); }
+  .admin-nav form.signout-form{ margin-left:auto; }
+  .admin-nav button.signout{ font:inherit; letter-spacing:inherit; text-transform:inherit; cursor:pointer; color:var(--paper-2); padding:0.6rem 1rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); white-space:nowrap; transition:color .2s ease, border-color .2s ease, background .2s ease; }
+  .admin-nav .signout{ color:var(--paper-2); }
   .admin-nav .signout:hover{ color:#ff8787; border-color:#ff8787; background:rgba(255,135,135,0.1); }
   .admin-nav a:focus-visible, .back:focus-visible, .btn-secondary:focus-visible, table.data-table a:focus-visible{ outline:2px solid var(--teal); outline-offset:2px; }
-  @media (max-width:640px){ .admin-nav{ font-size:0.625rem; } .admin-nav a{ padding:0.5rem 0.7rem; } .admin-nav .signout{ margin-left:0; } }
+  @media (max-width:640px){ .admin-nav{ font-size:0.625rem; } .admin-nav a{ padding:0.5rem 0.7rem; } .admin-nav form.signout-form{ margin-left:0; } .admin-nav button.signout{ padding:0.5rem 0.7rem; } }
   .filter-bar{ display:flex; gap:1rem; flex-wrap:wrap; align-items:end; margin-bottom:1.75rem; padding-bottom:1.5rem; border-bottom:1px solid var(--rule); }
   .filter-bar .field{ min-width:10rem; }
   .card-panel{ border:1px solid var(--rule); padding:1.5rem; margin-bottom:1.5rem; }

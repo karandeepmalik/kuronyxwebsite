@@ -19,22 +19,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $confirm  = (string) ($_POST['password_confirm'] ?? '');
 
         if ($name === '') $errors['name'] = 'Required';
+        elseif (mb_strlen($name) > 150) $errors['name'] = 'Must be 150 characters or fewer';
         if (!filter_var($email, FILTER_VALIDATE_EMAIL)) $errors['email'] = 'Enter a valid email address';
+        elseif (mb_strlen($email) > 190) $errors['email'] = 'Must be 190 characters or fewer';
         if (strlen($password) < 12) $errors['password'] = 'Use at least 12 characters';
+        elseif (strlen($password) > PASSWORD_MAX_BYTES) $errors['password'] = 'Use at most 72 characters';
         if ($password !== $confirm) $errors['password_confirm'] = 'Passwords do not match';
 
         if (empty($errors)) {
             $pdo = db();
-            $dupe = $pdo->prepare('SELECT id FROM staff_users WHERE email = ?');
-            $dupe->execute([$email]);
-            if ($dupe->fetch()) {
-                $errors['email'] = 'An account with this email already exists';
-            } else {
+            // Inserting directly and catching the UNIQUE violation (rather than checking
+            // for an existing row first, then inserting) closes the race where two admins
+            // submit the same email at once: a separate check-then-insert lets both pass
+            // the check before either commits, so the loser would otherwise hit a raw,
+            // uncaught duplicate-key error instead of this friendly message. The INSERT
+            // and the UNIQUE constraint check happen as a single atomic operation in the
+            // database, so there's no window between "is this taken" and "take it".
+            try {
                 $stmt = $pdo->prepare('INSERT INTO staff_users (name, email, password_hash, role) VALUES (?,?,?,?)');
                 $stmt->execute([$name, $email, password_hash($password, PASSWORD_DEFAULT), $role]);
                 audit('staff_account_created', 'staff_user', (int) $pdo->lastInsertId(), ['role' => $role, 'via' => 'admin_ui']);
                 header('Location: /admin/staff/?created=1');
                 exit;
+            } catch (PDOException $e) {
+                if ($e->getCode() !== '23000') {
+                    throw $e;
+                }
+                $errors['email'] = 'An account with this email already exists';
             }
         }
     }

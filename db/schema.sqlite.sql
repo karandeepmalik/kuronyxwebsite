@@ -29,6 +29,9 @@ CREATE TABLE login_attempts (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_identifier_time ON login_attempts (identifier, created_at);
+-- Standalone index on created_at alone — see schema.sql for why cleanup_old_rows()
+-- (includes/auth.php) needs this rather than relying on idx_identifier_time.
+CREATE INDEX idx_login_attempts_created_at ON login_attempts (created_at);
 
 CREATE TABLE rate_limit_hits (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -36,6 +39,7 @@ CREATE TABLE rate_limit_hits (
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_rate_limit_bucket_time ON rate_limit_hits (bucket, created_at);
+CREATE INDEX idx_rate_limit_hits_created_at ON rate_limit_hits (created_at);
 
 CREATE TABLE vet_applications (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,6 +62,8 @@ CREATE TABLE vet_applications (
     clinic_email          VARCHAR(190) NULL,
     clinic_website        VARCHAR(255) NULL,
     status                TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','under_review','approved','rejected','suspended')),
+    -- SQLite TEXT has no size cap, unlike MySQL's plain TEXT (64KB) — production uses
+    -- MEDIUMTEXT for this column specifically to avoid that cap; see schema.sql.
     internal_notes        TEXT NULL,
     reviewed_by           INTEGER NULL REFERENCES staff_users(id),
     reviewed_at           DATETIME NULL,
@@ -149,8 +155,13 @@ CREATE TABLE gs_requests (
     courier                  VARCHAR(100) NULL,
     tracking_number          VARCHAR(100) NULL,
     dispatch_date            DATE NULL,
+    erased_at                DATETIME NULL,
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- Optimistic-lock token for admin/gs-requests/view.php's update_final/assign_staff
+    -- actions — see schema.sql for why updated_at alone (only second-level precision)
+    -- isn't safe to use for this.
+    lock_version              INTEGER NOT NULL DEFAULT 0
 );
 
 -- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column
@@ -223,7 +234,7 @@ CREATE TABLE consent_records (
 
 CREATE TABLE audit_log (
     id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    actor_type     TEXT NOT NULL CHECK (actor_type IN ('staff','system','public')),
+    actor_type     TEXT NOT NULL CHECK (actor_type IN ('staff','system','public','vet')),
     actor_id       INTEGER NULL,
     action         VARCHAR(100) NOT NULL,
     entity_type    VARCHAR(50) NOT NULL,
@@ -244,7 +255,8 @@ CREATE TABLE dispatches (
     author_staff_id  INTEGER NULL REFERENCES staff_users(id),
     published_at     DATETIME NULL,
     created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    lock_version     INTEGER NOT NULL DEFAULT 0
 );
 
 -- MySQL's ON UPDATE CURRENT_TIMESTAMP has no SQLite equivalent as a column

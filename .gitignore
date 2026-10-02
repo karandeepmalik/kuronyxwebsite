@@ -1,5 +1,6 @@
 # Real credentials — created on the server via File Manager, never committed
 public_html/includes/db-config.php
+db-config.php
 
 # Local dev database/storage/sessions (SQLite stand-in for MySQL) — machine-specific
 local-dev/
@@ -8,3 +9,10 @@ local-dev/
 
 # Claude Code's own local tool config (browser-preview launch command) — not a project asset
 .claude/
+
+# Fallback folders the app creates itself when PRIVATE_STORAGE_PATH / SESSION_SAVE_PATH aren't configured — hold uploads and session data, never commit
+session_fallback/
+private_storage_fallback/
+
+# One-time first-admin page: source lives in tools/setup.php and is uploaded by hand — never deployed from the repo
+public_html/admin/setup.php

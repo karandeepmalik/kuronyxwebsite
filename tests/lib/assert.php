@@ -1,15 +1,25 @@
 <?php
 $GLOBALS['__results'] = [];
 
+class SkipTest extends RuntimeException {}
+
 function run_test(string $name, callable $fn): void {
     try {
         $fn();
         $GLOBALS['__results'][] = ['name' => $name, 'ok' => true];
         echo "  PASS  {$name}\n";
+    } catch (SkipTest $e) {
+        $GLOBALS['__results'][] = ['name' => $name, 'ok' => true];
+        echo "  SKIP  {$name} ({$e->getMessage()})\n";
     } catch (Throwable $e) {
         $GLOBALS['__results'][] = ['name' => $name, 'ok' => false, 'error' => $e->getMessage()];
         echo "  FAIL  {$name}\n        " . $e->getMessage() . "\n";
     }
+}
+
+// Call from inside a test closure to skip it (recorded as a pass, printed as SKIP).
+function skip_test(string $reason): void {
+    throw new SkipTest($reason);
 }
 
 function assert_true($cond, string $msg = 'Assertion failed'): void {

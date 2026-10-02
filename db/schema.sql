@@ -29,7 +29,12 @@ CREATE TABLE login_attempts (
     identifier  VARCHAR(190) NOT NULL,
     succeeded   TINYINT(1) NOT NULL DEFAULT 0,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_identifier_time (identifier, created_at)
+    INDEX idx_identifier_time (identifier, created_at),
+    -- Standalone index on created_at alone — cleanup_old_rows() (includes/auth.php)
+    -- deletes by created_at with no identifier predicate, which idx_identifier_time
+    -- above can't serve as a range scan (identifier is its leading column), so without
+    -- this the DELETE would scan/lock the entire table.
+    INDEX idx_login_attempts_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Generic rate-limit hit log (see rate_limited()/record_rate_limit_hit() in
@@ -39,7 +44,9 @@ CREATE TABLE rate_limit_hits (
     id          INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     bucket      VARCHAR(190) NOT NULL,
     created_at  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_bucket_time (bucket, created_at)
+    INDEX idx_bucket_time (bucket, created_at),
+    -- See idx_login_attempts_created_at above — same reasoning, same fix.
+    INDEX idx_rate_limit_hits_created_at (created_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE vet_applications (
@@ -63,7 +70,9 @@ CREATE TABLE vet_applications (
     clinic_email          VARCHAR(190) NULL,
     clinic_website        VARCHAR(255) NULL,
     status                ENUM('pending','under_review','approved','rejected','suspended') NOT NULL DEFAULT 'pending',
-    internal_notes        TEXT NULL,
+    -- MEDIUMTEXT (not TEXT, 64KB max) since every review action appends to this — a
+    -- long-lived application could otherwise exceed a plain TEXT column eventually.
+    internal_notes        MEDIUMTEXT NULL,
     reviewed_by           INT UNSIGNED NULL,
     reviewed_at           DATETIME NULL,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -141,8 +150,17 @@ CREATE TABLE gs_requests (
     courier                  VARCHAR(100) NULL,
     tracking_number          VARCHAR(100) NULL,
     dispatch_date            DATE NULL,
+    -- Set when the case's personal data was erased (includes/data-protection.php); NULL = not erased.
+    erased_at                DATETIME NULL,
     created_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at               DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Optimistic-lock token for admin/gs-requests/view.php's update_final/assign_staff
+    -- actions. updated_at alone isn't safe for this: DATETIME here has only
+    -- second-level precision, so two genuinely different edits landing within the same
+    -- second would carry an identical "expected" value and the second one would
+    -- silently win instead of being caught as a conflict. lock_version is bumped by
+    -- exactly 1 on every such write, so it can't collide regardless of timing.
+    lock_version              INT UNSIGNED NOT NULL DEFAULT 0,
     CONSTRAINT fk_gsreq_staff FOREIGN KEY (assigned_staff_id) REFERENCES staff_users(id),
     CONSTRAINT fk_gsreq_vetaccount FOREIGN KEY (vet_account_id) REFERENCES vet_accounts(id),
     INDEX idx_gsreq_status (status),
@@ -218,7 +236,7 @@ CREATE TABLE consent_records (
 
 CREATE TABLE audit_log (
     id             INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    actor_type     ENUM('staff','system','public') NOT NULL,
+    actor_type     ENUM('staff','system','public','vet') NOT NULL,
     actor_id       INT UNSIGNED NULL,
     action         VARCHAR(100) NOT NULL,
     entity_type    VARCHAR(50) NOT NULL,
@@ -241,6 +259,9 @@ CREATE TABLE dispatches (
     published_at     DATETIME NULL,
     created_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at       DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    -- Optimistic-lock token — see gs_requests.lock_version for why updated_at alone
+    -- (second-level precision) isn't safe for this.
+    lock_version     INT UNSIGNED NOT NULL DEFAULT 0,
     CONSTRAINT fk_dispatch_author FOREIGN KEY (author_staff_id) REFERENCES staff_users(id),
     INDEX idx_dispatch_status_published (status, published_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
