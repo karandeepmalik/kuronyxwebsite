@@ -1,4 +1,13 @@
 User-agent: *
 Allow: /
+Disallow: /admin/
+Disallow: /includes/
+Disallow: /for-veterinarians/apply
+Disallow: /for-veterinarians/login.php
+Disallow: /for-veterinarians/activate.php
+Disallow: /for-veterinarians/forgot-password.php
+Disallow: /for-veterinarians/reset-password.php
+Disallow: /for-veterinarians/portal/
+Disallow: /request-received
 
 Sitemap: https://kuronyx.in/sitemap.xml

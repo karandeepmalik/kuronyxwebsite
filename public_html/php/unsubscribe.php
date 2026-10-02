@@ -1,31 +1,51 @@
 <?php
 require_once 'config.php';
+require_once __DIR__ . '/../includes/auth.php';
 
-$email = filter_var(trim($_GET['email'] ?? ''), FILTER_VALIDATE_EMAIL);
+// Two steps — GET only shows a confirmation page; the actual removal needs a POST from that
+// page. Email security scanners and link-preview bots fetch every URL in a message with a
+// plain GET, so when GET itself unsubscribed the address, people were being unsubscribed
+// by software before they ever read the email. The CSRF token (tied to a session cookie
+// a bot following the link never presents on a POST) and the per-IP limit also keep this
+// from being used to mass-unsubscribe arbitrary addresses by script.
+// NOTE: this still can't prove the requester owns the address — that needs a signed token
+// in the link, which means changing the unsubscribe link in the Brevo email templates
+// (outside this repo); Brevo's own built-in unsubscribe link is the proper long-term fix.
+csrf_token();
+$email = filter_var(trim($_GET['email'] ?? $_POST['email'] ?? ''), FILTER_VALIDATE_EMAIL);
 $done  = false;
 $error = false;
+$limited = false;
 
-if ($email) {
-    // Remove contact from list 7 via Brevo API
-    $payload = json_encode(['emails' => [$email]]);
+if ($email && $_SERVER['REQUEST_METHOD'] === 'POST') {
+    if (!csrf_verify()) {
+        $error = true;
+    } elseif (rate_limited('unsubscribe:' . client_ip(), 10, 60)) {
+        $limited = true;
+    } else {
+        // Remove contact from the newsletter list via Brevo API
+        $payload = json_encode(['emails' => [$email]]);
 
-    $ch = curl_init('https://api.brevo.com/v3/contacts/lists/7/contacts/remove');
-    curl_setopt_array($ch, [
-        CURLOPT_RETURNTRANSFER => true,
-        CURLOPT_CUSTOMREQUEST  => 'POST',
-        CURLOPT_POSTFIELDS     => $payload,
-        CURLOPT_HTTPHEADER     => [
-            'accept: application/json',
-            'api-key: ' . BREVO_API_KEY,
-            'content-type: application/json',
-        ],
-    ]);
-    $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-    curl_close($ch);
+        $ch = curl_init('https://api.brevo.com/v3/contacts/lists/' . (int) BREVO_LIST_ID . '/contacts/remove');
+        curl_setopt_array($ch, [
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => 15,
+            CURLOPT_CONNECTTIMEOUT => 5,
+            CURLOPT_CUSTOMREQUEST  => 'POST',
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_HTTPHEADER     => [
+                'accept: application/json',
+                'api-key: ' . BREVO_API_KEY,
+                'content-type: application/json',
+            ],
+        ]);
+        $response = curl_exec($ch);
+        $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
 
-    $done  = ($httpCode === 201 || $httpCode === 204);
-    $error = !$done;
+        $done  = ($httpCode === 201 || $httpCode === 204);
+        $error = !$done;
+    }
 }
 ?>
 <!DOCTYPE html>
@@ -53,9 +73,20 @@ if ($email) {
     <?php if ($done): ?>
       <h1>You've been unsubscribed.</h1>
       <p>You will no longer receive Field Dispatches emails. We're sorry to see you go.</p>
+    <?php elseif ($limited): ?>
+      <h1>Too many requests.</h1>
+      <p class="error">Please try again later, or contact us at hello@kuronyx.in.</p>
     <?php elseif ($error): ?>
       <h1>Something went wrong.</h1>
       <p class="error">We couldn't process your request. Please try again or contact us at hello@kuronyx.in.</p>
+    <?php elseif ($email): ?>
+      <h1>Unsubscribe?</h1>
+      <p>Stop sending Field Dispatches emails to <strong><?= htmlspecialchars($email, ENT_QUOTES) ?></strong>?</p>
+      <form method="POST" style="margin-top:24px;">
+        <?= csrf_field() ?>
+        <input type="hidden" name="email" value="<?= htmlspecialchars($email, ENT_QUOTES) ?>">
+        <button type="submit" style="background:#58959D; color:#0c161e; border:0; padding:12px 22px; font-size:12px; letter-spacing:0.12em; text-transform:uppercase; cursor:pointer;">Confirm unsubscribe</button>
+      </form>
     <?php else: ?>
       <h1>Invalid request.</h1>
       <p>No email address was provided.</p>

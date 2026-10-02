@@ -16,13 +16,13 @@
 <meta property="og:title" content="Kuronyx Sciences — FIP &amp; GS-441524 Veterinary Compounding">
 <meta property="og:description" content="Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats, made to prescription under Schedule N.">
 <meta property="og:url" content="https://kuronyx.in/">
-<meta property="og:image" content="https://kuronyx.in/assets/logo.jpg"><!-- 1200x630 recommended -->
+<meta property="og:image" content="https://kuronyx.in/assets/logoNoBG.png"><!-- 1200x630 recommended -->
 
 <!-- ---------- TWITTER / X CARD ---------- -->
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Kuronyx Sciences — FIP &amp; GS-441524 Veterinary Compounding">
 <meta name="twitter:description" content="Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats.">
-<meta name="twitter:image" content="https://kuronyx.in/assets/logo.jpg">
+<meta name="twitter:image" content="https://kuronyx.in/assets/logoNoBG.png">
 
 <script type="application/ld+json">
 {
@@ -31,8 +31,8 @@
   "name": "Kuronyx Sciences",
   "alternateName": "Kuronyx",
   "url": "https://kuronyx.in/",
-  "logo": "https://kuronyx.in/assets/logo.jpg",
-  "image": "https://kuronyx.in/assets/logo.jpg",
+  "logo": "https://kuronyx.in/assets/logoNoBG.png",
+  "image": "https://kuronyx.in/assets/logoNoBG.png",
   "description": "Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats, made to prescription under Schedule N.",
   "email": "ops@kuronyx.in",
   "telephone": "+917083515424",
@@ -230,6 +230,9 @@
     white-space:nowrap;
   }
   .chrome .meta .sep{ color:var(--paper-4); }
+  .chrome .meta.site-nav{ flex-wrap:wrap; row-gap:0.4rem; }
+  .chrome .meta.site-nav a{ color:var(--paper-2); text-decoration:none; border-bottom:1px solid var(--paper-4); padding-bottom:1px; transition:color .25s ease,border-color .25s ease; }
+  .chrome .meta.site-nav a:hover{ color:var(--teal); border-bottom-color:var(--teal); }
 
   /* ——— left telemetry rail ——— */
   .rail{
@@ -816,11 +819,15 @@
     <span class="dot"></span>
     <span id="centerLabel">SYS · IDLE</span>
   </span>
-  <span class="meta">
-    <span id="clock">—</span>
+  <nav class="meta site-nav" aria-label="Primary">
+    <a href="/about">About</a>
+    <a href="/for-veterinarians">For Veterinarians</a>
+    <a href="/for-cat-owners">For Cat Owners</a>
+    <a href="/dispatches">Dispatches</a>
+    <a href="/contact-us">Contact Us</a>
     <span class="sep">·</span>
-    <span style="white-space:nowrap;">IST · 19.127733°N 72.834761°E</span>
-  </span>
+    <span id="clock">—</span>
+  </nav>
 </header>
 
 <nav class="rail" aria-label="Section navigation">
@@ -1000,13 +1007,9 @@
           No marketing. Unsubscribe in one click.
         </p>
 
-        <form class="subscribe reveal" style="--rd:400ms" id="subscribeForm"
-              name="newsletter"
+        <form class="subscribe reveal" style="--rd:400ms" id="subscribeForm" data-captcha
               method="POST"
-              data-netlify="true"
-              netlify-honeypot="bot-field"
               novalidate>
-          <input type="hidden" name="form-name" value="newsletter" />
           <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
           <div class="heading">Field dispatches · subscribe</div>
           <div class="input-group">
@@ -1052,13 +1055,9 @@
           For veterinarians with a patient query or a prescription enquiry.
         </p>
 
-        <form class="enquiry reveal" style="--rd:240ms" id="enquiryForm"
-              name="enquiry"
+        <form class="enquiry reveal" style="--rd:240ms" id="enquiryForm" data-captcha
               method="POST"
-              data-netlify="true"
-              netlify-honeypot="bot-field"
               novalidate>
-          <input type="hidden" name="form-name" value="enquiry" />
           <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
 
           <div class="field-row two">
@@ -1182,7 +1181,7 @@
   window.addEventListener('resize', onScroll);
   onScroll();
 
-  // ——— enquiry form (Netlify submit + UI feedback)
+  // ——— enquiry form (UI feedback + submit to /php/send-enquiry.php)
   const enqForm   = document.getElementById('enquiryForm');
   const enqBtn    = document.getElementById('enquiryBtn');
   const enqStatus = document.getElementById('enquiryStatus');
@@ -1229,22 +1228,13 @@
         const formData = new FormData(enqForm);
         const payload = {};
         formData.forEach((v, k) => {
-          if (k !== 'bot-field' && k !== 'form-name') {
-            payload[k] = v;
-          }
+          payload[k] = v;
         });
-        
-        // Background backup submission to Netlify
-        try {
-          const body = new URLSearchParams();
-          formData.forEach((v, k) => body.append(k, v));
-          fetch('/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-          });
-        } catch (e) {}
 
+        if (window.KuronyxCaptcha && KuronyxCaptcha.enabled) {
+          payload['cf-turnstile-response'] = KuronyxCaptcha.token(enqForm);
+          if (!payload['cf-turnstile-response']) throw new Error('Please complete the verification check');
+        }
         const res = await fetch('/php/send-enquiry.php', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1266,6 +1256,7 @@
     });
   }
 </script>
+<script src="js/captcha.js"></script>
 <script src="js/subscribe.js"></script>
 </body>
 </html>
