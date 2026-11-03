@@ -17,6 +17,7 @@ function gs_session_storage_path(): string {
     if (defined('SESSION_SAVE_PATH') && SESSION_SAVE_PATH !== '') {
         return rtrim(SESSION_SAVE_PATH, '/');
     }
+    // dirname(__DIR__, 2) is the folder ABOVE public_html only because includes/ sits directly inside public_html.
     $fallback = dirname(__DIR__, 2) . '/session_fallback';
     if (!is_dir($fallback)) {
         @mkdir($fallback, 0750, true);
@@ -73,6 +74,10 @@ function gs_session_start(?string $area = null): void {
     // whatever they typed. 4 hours comfortably covers a working session without session
     // files accumulating forever (gc_probability/gc_divisor still apply as normal).
     ini_set('session.gc_maxlifetime', (string) GS_SESSION_LIFETIME);
+    // Strict mode: PHP refuses a session id it did not issue and starts a fresh one. Without it a browser still holding an
+    // old cookie after logout (or one planted by someone else) got a new session created UNDER THAT SAME ID. Logins
+    // regenerate the id anyway, so it was not an auth hole - this just stops ids we did not issue from being adopted.
+    ini_set('session.use_strict_mode', '1');
     $savePath = gs_session_storage_path();
     if (is_dir($savePath) && is_writable($savePath)) {
         session_save_path($savePath);
@@ -183,27 +188,56 @@ function current_staff(): ?array {
     return $_SESSION['staff'] ?? null;
 }
 
+// Re-reads a signed-in staff member's record and returns their identity as it is NOW, or null when they must not be
+// let in: the account is gone or deactivated, or the password was changed since this session started (see
+// password_fingerprint(): without that check a password reset would only stop future logins, and a session issued
+// before it - including one an attacker had stolen - would keep working indefinitely).
+//
+// The role and name are re-read too, not trusted from the session saved at sign-in: otherwise a role changed in the
+// database (a demotion by hand today, a role-change screen one day) did not apply until that person signed in
+// again, and the session only expires after 4 hours of INACTIVITY, so someone who keeps working never would. It is
+// the same query that already ran on every request, so this costs nothing extra. Used by require_login() and by
+// download.php (which cannot call it, see there), so the two cannot drift apart.
+function staff_identity_now(array $sessionStaff): ?array {
+    $q = db()->prepare('SELECT name, email, role, active, password_hash FROM staff_users WHERE id = ?');
+    $q->execute([$sessionStaff['id']]);
+    $row = $q->fetch();
+    if (!$row || (int) $row['active'] !== 1 || !password_fingerprint_matches($sessionStaff, $row['password_hash'])) {
+        return null;
+    }
+    return array_merge($sessionStaff, ['name' => $row['name'], 'email' => $row['email'], 'role' => $row['role']]);
+}
+
+// Pages behind a sign-in show owners' names and addresses, patient details and applicants' documents, so the browser
+// must not keep a copy: after signing out, the Back button would otherwise show them straight from its cache. PHP's
+// session handling happens to send no-store already (session.cache_limiter defaults to 'nocache'), but that is a
+// server setting we cannot see on the host and nothing in this code says it matters, so it is sent explicitly here
+// by require_login() and require_vet_login() (download.php sends its own). The values differ from PHP's default on
+// purpose, so a test can tell ours from the default. Must run before any output, and AFTER the session has started:
+// session_start() sends PHP's cache headers itself and would replace these if they were set first.
+function send_private_page_headers(): void {
+    header('Cache-Control: no-store, private');
+    header('Pragma: no-cache');
+    header('Expires: 0');
+}
+
 function require_login(): array {
     $staff = current_staff();
+    send_private_page_headers(); // after the session has started: starting it sends PHP's own cache headers, which would replace ours
     if (!$staff) {
         header('Location: /admin/login.php');
         exit;
     }
-    // Re-checked against the DB (not just the session) on every request so
-    // deactivating a staff account takes effect immediately, not on next login.
-    // Also re-checks the session's password fingerprint (see admin/login.php) against
-    // the current password_hash — without this, a password reset would only stop
-    // future logins; any session issued before the reset (including one an attacker
-    // had stolen) would keep working indefinitely, defeating the point of resetting it.
-    $row = db()->prepare('SELECT active, password_hash FROM staff_users WHERE id = ?');
-    $row->execute([$staff['id']]);
-    $row = $row->fetch();
-    if (!$row || (int) $row['active'] !== 1 || !password_fingerprint_matches($staff, $row['password_hash'])) {
+    // Re-checked against the DB (not just the session) on every request so deactivating a staff account, or changing
+    // its role, takes effect immediately, not on next login. See staff_identity_now().
+    $fresh = staff_identity_now($staff);
+    if ($fresh === null) {
         unset($_SESSION['staff']);
         header('Location: /admin/login.php');
         exit;
     }
-    return $staff;
+    $_SESSION['staff'] = $fresh; // keep the session's copy current, so pages that read it directly see it too
+    return $fresh;
 }
 
 function require_role(array $roles): array {
@@ -213,6 +247,27 @@ function require_role(array $roles): array {
         exit('Forbidden.');
     }
     return $staff;
+}
+
+// Ends the current session for good (the logout pages call this after auditing). Beyond emptying and destroying the
+// session it expires the session COOKIE - which used to be left in the browser pointing at a destroyed session - and
+// sends Clear-Site-Data: "cache", which asks the browser to drop its cached pages for this site, so Back after
+// signing out cannot show the pages that were open (Chrome, Firefox and Edge honour it over HTTPS; Safari does not,
+// which is why the pages are also no-store, see send_private_page_headers()).
+function sign_out_and_clear_browser_cache(): void {
+    gs_session_start();
+    $_SESSION = [];
+    $p = session_get_cookie_params(); // the params gs_session_start() created the cookie with
+    setcookie(session_name(), '', [
+        'expires'  => time() - 42000,
+        'path'     => $p['path'],
+        'domain'   => $p['domain'],
+        'secure'   => $p['secure'],
+        'httponly' => $p['httponly'],
+        'samesite' => $p['samesite'] ?: 'Lax',
+    ]);
+    session_destroy();
+    header('Clear-Site-Data: "cache"');
 }
 
 // --- Veterinarian portal session (separate from staff, same session cookie) ---
@@ -225,6 +280,7 @@ function current_vet(): ?array {
 
 function require_vet_login(): array {
     $vet = current_vet();
+    send_private_page_headers(); // after the session has started (see require_login())
     if (!$vet) {
         header('Location: /for-veterinarians/login.php');
         exit;
@@ -347,6 +403,40 @@ function is_transient_contention_error(PDOException $e): bool {
     $message = $e->getMessage();
     return str_contains($message, 'Lock wait timeout') // MySQL 1205
         || str_contains($message, 'database is locked'); // SQLite SQLITE_BUSY
+}
+
+// True only when this PDOException is a duplicate on one specific UNIQUE column ($table.$column) -
+// not merely "an integrity violation". SQLSTATE 23000, which the app used to test for, is the
+// generic code for ANY integrity error (duplicate key, foreign key, NOT NULL), so a caller that
+// assumed "23000 means my duplicate" retried or reported the wrong thing for the others.
+// The engines word it differently, so both are recognised:
+//   - SQLite: driver code 19 (SQLITE_CONSTRAINT), message "UNIQUE constraint failed: dispatches.slug"
+//     (a multi-column key lists every column, "t.a, t.b").
+//   - MySQL / MariaDB: driver code 1062 (ER_DUP_ENTRY), message "Duplicate entry 'x' for key 'slug'"
+//     (MariaDB) or "... for key 'dispatches.slug'" (MySQL 8). The key is named after the column for
+//     an inline `col ... UNIQUE`, which is how every UNIQUE column in db/schema.sql is declared. A
+//     PRIMARY KEY is always named 'PRIMARY' by MySQL, whatever the column is called - pass
+//     $isPrimaryKey = true for that case.
+// Verified against the real messages of both SQLite and MariaDB 11.8.9 (tests/cases/62_unique_violation.php).
+function is_unique_violation(PDOException $e, string $table, string $column, bool $isPrimaryKey = false): bool {
+    $info   = $e->errorInfo ?? [];
+    $code   = (int) ($info[1] ?? 0);
+    $message = (string) ($info[2] ?? $e->getMessage());
+
+    if ($code === 19) {
+        if (!preg_match('/UNIQUE constraint failed:\s*(.+)$/', $message, $m)) {
+            return false;
+        }
+        return in_array("{$table}.{$column}", array_map('trim', explode(',', $m[1])), true);
+    }
+    if ($code === 1062) {
+        if (!preg_match("/for key '([^']+)'/", $message, $m)) {
+            return false;
+        }
+        return $m[1] === $column || $m[1] === "{$table}.{$column}"
+            || ($isPrimaryKey && ($m[1] === 'PRIMARY' || $m[1] === "{$table}.PRIMARY"));
+    }
+    return false;
 }
 
 // Runs $work(PDO) inside one begin_serialized_window_transaction(), committing on success
@@ -540,6 +630,11 @@ function rate_limit_release(?int $hitId): void {
 
 const PASSWORD_RESET_TTL_MINUTES = 60;
 
+// A new staff member's invitation is the same single-use set-password link, but they may not open the email for
+// a day or two, so it lasts 7 days (like a vet's activation link). If it lapses, "Forgot your password?" on the
+// sign-in page issues a fresh one.
+const STAFF_INVITE_TTL_MINUTES = 7 * 24 * 60;
+
 // Base URL used inside emailed links. Deliberately NOT taken from the request's Host
 // header — a forged Host would otherwise let an attacker make the site email a victim a
 // reset link pointing at the attacker's domain. Set SITE_URL in db-config.php for
@@ -568,11 +663,11 @@ function password_reset_condition(string $table): string {
 
 // Generates and stores a one-time reset token (only its SHA-256 hash is persisted) and
 // returns the raw token, which exists only in the emailed link.
-function issue_password_reset(string $table, int $id): string {
+function issue_password_reset(string $table, int $id, int $ttlMinutes = PASSWORD_RESET_TTL_MINUTES): string {
     password_reset_condition($table);
     $raw = bin2hex(random_bytes(32));
     db()->prepare("UPDATE {$table} SET password_reset_token_hash = ?, password_reset_expires_at = ? WHERE id = ?")
-        ->execute([hash('sha256', $raw), gmdate('Y-m-d H:i:s', time() + PASSWORD_RESET_TTL_MINUTES * 60), $id]);
+        ->execute([hash('sha256', $raw), gmdate('Y-m-d H:i:s', time() + $ttlMinutes * 60), $id]);
     return $raw;
 }
 
@@ -653,8 +748,47 @@ const PASSWORD_MAX_BYTES = 72;
 // narrow it down. $perPage + 1 rows are fetched so "is there a next page" costs no COUNT(*).
 const LIST_PAGE_SIZE = 100;
 
+// The page number from ?page=, always a sane positive integer. Junk or <= 0 means page 1. It is also
+// capped: (int) of an absurdly large number is PHP_INT_MAX, and (page - 1) * LIST_PAGE_SIZE then overflows
+// into a float that gets written into the SQL as "9.2233720368548E+20" - a syntax error, i.e. a 500 from
+// a URL anyone can type. 100,000 pages is far beyond any real list, and an offset that size is still fine.
 function list_page(): int {
-    return max(1, (int) ($_GET['page'] ?? 1));
+    return min(100000, max(1, (int) ($_GET['page'] ?? 1)));
+}
+
+// A list filter from the URL (?status=…), accepted only if it is one of $allowed. Anything else - a typo
+// like ?status=aproved, a stale bookmark - comes back as '' (no filter) and is recorded in $ignored, which
+// list_ignored_filters_notice() turns into a visible note. Without this a mistyped value was passed to the
+// query as-is, matched nothing, and showed "No requests match these filters" with the dropdown reading
+// "All": an empty list with no hint why. (It was never a security problem - the value is a bound
+// parameter - only a misleading page.)
+function list_filter(string $name, array $allowed, array &$ignored): string {
+    $value = $_GET[$name] ?? '';
+    if (!is_string($value) || $value === '') {
+        return '';
+    }
+    if (in_array($value, $allowed, true)) {
+        return $value;
+    }
+    $ignored[$name] = $value;
+    return '';
+}
+
+// "Filter ignored" note for the values list_filter() rejected: ['status' => 'aproved', …] -> HTML.
+// Says exactly which value was not recognised and what was done about it. The value is attacker-typed
+// text echoed back, so it is escaped and shortened.
+function list_ignored_filters_notice(array $ignored): string {
+    if (!$ignored) {
+        return '';
+    }
+    $lines = [];
+    foreach ($ignored as $name => $value) {
+        $shown = mb_strlen($value) > 40 ? mb_substr($value, 0, 40) . '…' : $value;
+        $lines[] = 'The ' . htmlspecialchars($name, ENT_QUOTES) . ' filter &ldquo;' . htmlspecialchars($shown, ENT_QUOTES)
+                 . '&rdquo; is not a valid ' . htmlspecialchars($name, ENT_QUOTES) . ', so it was ignored and the list is not filtered by it.';
+    }
+    return '<div class="notice" role="status"><span class="notice-label">' . (count($lines) > 1 ? 'Filters ignored' : 'Filter ignored')
+         . '</span><p>' . implode('</p><p>', $lines) . '</p></div>';
 }
 
 function list_pager(int $page, bool $hasMore): string {
@@ -724,15 +858,40 @@ function audit(string $action, string $entityType, ?int $entityId, array $metada
         $actorId = $_SESSION['staff']['id'] ?? null;
     }
     $stmt = db()->prepare(
-        'INSERT INTO audit_log (actor_type, actor_id, action, entity_type, entity_id, metadata_json)
-         VALUES (?, ?, ?, ?, ?, ?)'
+        'INSERT INTO audit_log (actor_type, actor_id, actor_name, action, entity_type, entity_id, metadata_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?)'
     );
     $stmt->execute([
         $actorType,
         $actorId,
+        audit_actor_name($actorType, $actorId),
         $action,
         $entityType,
         $entityId,
         $metadata ? json_encode($metadata) : null,
     ]);
+}
+
+// The acting person's name, copied onto the audit row at the moment it is written, so the log
+// still reads correctly if that account is later renamed or removed. Deliberately its own column
+// (audit_log.actor_name), not metadata_json: erase_gs_request() nulls metadata_json on case
+// entries, which would wipe the name along with the personal data. Only staff and vets get one -
+// a 'public' actor is an anonymous visitor (for a cat-owner submission, the pet owner), and their
+// name is exactly the personal data erasure is meant to be able to clear, so it is never copied
+// here. No try/catch: audit() often runs inside a transaction, and swallowing a lock error from
+// this read would leave later statements running outside that transaction.
+function audit_actor_name(string $actorType, ?int $actorId): ?string {
+    if ($actorId === null) return null;
+    if ($actorType === 'staff') {
+        $stmt = db()->prepare('SELECT name FROM staff_users WHERE id = ?');
+    } elseif ($actorType === 'vet') {
+        $stmt = db()->prepare(
+            'SELECT a.full_name FROM vet_accounts va JOIN vet_applications a ON a.id = va.vet_application_id WHERE va.id = ?'
+        );
+    } else {
+        return null;
+    }
+    $stmt->execute([$actorId]);
+    $name = $stmt->fetchColumn();
+    return ($name === false || $name === null || $name === '') ? null : mb_substr((string) $name, 0, 150);
 }

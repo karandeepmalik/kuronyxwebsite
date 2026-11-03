@@ -67,6 +67,8 @@ CREATE TABLE vet_applications (
     internal_notes        TEXT NULL,
     reviewed_by           INTEGER NULL REFERENCES staff_users(id),
     reviewed_at           DATETIME NULL,
+    -- Set when the application's personal data was erased (includes/data-protection.php); NULL = not erased.
+    erased_at             DATETIME NULL,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -90,6 +92,17 @@ CREATE TABLE vet_application_documents (
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX idx_vetappdoc_app ON vet_application_documents (application_id);
+
+CREATE TABLE vet_application_consents (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id         INTEGER NOT NULL REFERENCES vet_applications(id) ON DELETE CASCADE,
+    consent_type           VARCHAR(50) NOT NULL,
+    consent_text_version   VARCHAR(50) NOT NULL,
+    ip_address             VARCHAR(45) NULL,
+    user_agent             VARCHAR(255) NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_vetappconsent_app ON vet_application_consents (application_id);
 
 CREATE TABLE vet_accounts (
     id                       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -240,16 +253,20 @@ CREATE TABLE audit_log (
     entity_type    VARCHAR(50) NOT NULL,
     entity_id      INTEGER NULL,
     metadata_json  TEXT NULL,
-    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- See schema.sql: the actor's name when the row was written (staff and vets only).
+    actor_name     VARCHAR(150) NULL
 );
 CREATE INDEX idx_audit_entity ON audit_log (entity_type, entity_id);
-CREATE INDEX idx_audit_created ON audit_log (created_at);
+CREATE INDEX idx_audit_created_id ON audit_log (created_at, id);
 
 CREATE TABLE dispatches (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     title            VARCHAR(200) NOT NULL,
     slug             VARCHAR(200) NOT NULL UNIQUE,
     excerpt          VARCHAR(400) NULL,
+    issue_number     INTEGER NULL UNIQUE,
+    author           VARCHAR(255) NULL,
     body             TEXT NOT NULL,
     status           TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft','published')),
     author_staff_id  INTEGER NULL REFERENCES staff_users(id),

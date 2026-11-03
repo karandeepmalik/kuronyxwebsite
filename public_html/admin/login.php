@@ -99,7 +99,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle     = 'Staff Sign In — Kuronyx Admin';
+$pageTitle     = 'Staff Sign In - Kuronyx Admin';
 $robotsNoindex = true;
 $backHref      = '/';
 $backLabel     = 'Back to site';

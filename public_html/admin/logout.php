@@ -10,7 +10,6 @@ $staff = current_staff();
 if ($staff) {
     audit('staff_logout', 'staff_user', $staff['id'], []);
 }
-$_SESSION = [];
-session_destroy();
+sign_out_and_clear_browser_cache(); // destroys the session, expires its cookie and asks the browser to drop cached pages
 header('Location: /admin/login.php');
 exit;

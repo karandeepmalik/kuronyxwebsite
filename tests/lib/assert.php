@@ -38,6 +38,27 @@ function assert_contains(string $needle, string $haystack, string $msg = ''): vo
     }
 }
 
+// A form field must show ITS error text under it (field_error_html() in includes/form-errors.php) and tell
+// screen readers which message belongs to which input. Checks the elements, never loose page text: the
+// stylesheet mentions ".field-error" and "has-error" on every page, so a bare assert_contains('has-error')
+// passes even when no message is printed - which is exactly how the missing messages went unnoticed.
+function assert_field_error(string $html, string $field, string $message, string $where = ''): void {
+    $span = '<span class="field-error" id="err-' . $field . '">' . htmlspecialchars($message, ENT_QUOTES) . '</span>';
+    $prefix = $where !== '' ? "{$where}: " : '';
+    if (strpos($html, $span) === false) {
+        throw new RuntimeException("{$prefix}the '{$field}' field does not show its message \"{$message}\" (no {$span} on the page)");
+    }
+    if (strpos($html, ' aria-invalid="true" aria-describedby="err-' . $field . '"') === false) {
+        throw new RuntimeException("{$prefix}the '{$field}' input is not marked aria-invalid / aria-describedby for its message");
+    }
+}
+
+function assert_no_field_error(string $html, string $field, string $where = ''): void {
+    if (strpos($html, 'id="err-' . $field . '"') !== false) {
+        throw new RuntimeException(($where !== '' ? "{$where}: " : '') . "the '{$field}' field shows an error it should not have");
+    }
+}
+
 function print_summary(): int {
     $pass = count(array_filter($GLOBALS['__results'], fn($r) => $r['ok']));
     $fail = count($GLOBALS['__results']) - $pass;

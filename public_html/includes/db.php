@@ -5,6 +5,8 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
     exit('Forbidden.');
 }
 
+require_once __DIR__ . '/log-safe.php'; // log_safe(): email addresses never go to the error log
+
 // db-config.php is created manually on the server (never committed) and won't exist
 // right after a fresh deploy — fail closed with a plain 503 instead of a raw PHP
 // "failed to open required file" fatal error.
@@ -57,21 +59,25 @@ unset($__params, $__value);
 // specific to the visitor. Applies site-wide since every dynamic page requires this file.
 ini_set('display_errors', '0');
 set_exception_handler(function (Throwable $e): void {
-    error_log('[GS-441524] Uncaught ' . get_class($e) . ': ' . $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine());
+    error_log('[GS-441524] Uncaught ' . get_class($e) . ': ' . log_safe($e->getMessage()) . ' in ' . $e->getFile() . ':' . $e->getLine());
+    // A live host with no PRIVATE_STORAGE_PATH refuses to store or read documents (see private_storage_path()): say so plainly.
+    $unavailable = $e instanceof StorageNotConfiguredException;
     if (!headers_sent()) {
-        http_response_code(500);
+        http_response_code($unavailable ? 503 : 500);
         header('Content-Type: text/html; charset=UTF-8');
     }
-    echo '<!doctype html><html><head><title>Something went wrong</title></head>'
+    echo '<!doctype html><html><head><title>' . ($unavailable ? 'Temporarily unavailable' : 'Something went wrong') . '</title></head>'
        . '<body style="font-family:sans-serif;background:#22384A;color:#F5F5F5;padding:3rem;">'
-       . '<h1>Something went wrong.</h1><p>Please try again shortly. If this continues, contact '
+       . ($unavailable
+            ? '<h1>Temporarily unavailable.</h1><p>Uploads and documents cannot be used right now. Please try again later. If this continues, contact '
+            : '<h1>Something went wrong.</h1><p>Please try again shortly. If this continues, contact ')
        . '<a href="mailto:ops@kuronyx.in" style="color:#58959D;">ops@kuronyx.in</a>.</p></body></html>';
 });
 
 // Formats a stored UTC timestamp for display in India time (IST). Stored values stay
 // UTC everywhere; only what a person reads on screen is converted.
 function fmt_time(?string $utc): string {
-    if ($utc === null || $utc === '') return '—';
+    if ($utc === null || $utc === '') return '-';
     try {
         $d = new DateTime($utc, new DateTimeZone('UTC'));
         $d->setTimezone(new DateTimeZone('Asia/Kolkata'));

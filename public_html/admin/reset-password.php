@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/form-errors.php';
 
 csrf_token();
 
@@ -28,7 +29,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
             if (complete_password_reset('staff_users', (int) $account['id'], $rawToken, $password)) {
                 // A locked-out user resetting their password should be able to sign in straight away.
                 clear_login_attempts(strtolower($account['email']));
-                audit('password_reset_completed', 'staff_user', (int) $account['id'], [], 'public');
+                // The account holder just proved ownership via the emailed link, so this is that
+                // staff member acting - log it as them (id + name), as the vet reset already does.
+                audit('password_reset_completed', 'staff_user', (int) $account['id'], [], 'staff', (int) $account['id']);
                 $done = true;
             } else {
                 $account = null; // someone else already used this link first
@@ -37,7 +40,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
     }
 }
 
-$pageTitle     = 'Reset Password — Kuronyx Admin';
+$pageTitle     = 'Reset Password - Kuronyx Admin';
 $robotsNoindex = true;
 $backHref      = '/admin/login.php';
 $backLabel     = 'Back to sign in';
@@ -58,13 +61,15 @@ require __DIR__ . '/../includes/layout-header.php';
       <form method="POST" novalidate>
         <?= csrf_field() ?>
         <input type="hidden" name="token" value="<?= htmlspecialchars($rawToken, ENT_QUOTES) ?>">
-        <label class="field <?= isset($errors['password']) ? 'has-error' : '' ?>">
+        <label class="<?= field_class($errors, 'password') ?>">
           <span class="lbl">New password (min. 12 characters)</span>
-          <input type="password" name="password" required minlength="12" autofocus>
+          <input type="password" name="password" required minlength="12" autofocus<?= field_error_attrs($errors, 'password') ?>>
+          <?= field_error_html($errors, 'password') ?>
         </label>
-        <label class="field <?= isset($errors['password_confirm']) ? 'has-error' : '' ?>">
+        <label class="<?= field_class($errors, 'password_confirm') ?>">
           <span class="lbl">Confirm new password</span>
-          <input type="password" name="password_confirm" required minlength="12">
+          <input type="password" name="password_confirm" required minlength="12"<?= field_error_attrs($errors, 'password_confirm') ?>>
+          <?= field_error_html($errors, 'password_confirm') ?>
         </label>
         <button type="submit" class="btn-primary" style="margin-top:1rem;">Change Password</button>
       </form>

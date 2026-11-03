@@ -61,12 +61,32 @@ return function (TestEnv $env): void {
 
         $short = $setPassword('/admin/reset-password.php', $token, 'short', 'short', 'cookies-pwreset-staff-set');
         assert_contains('has-error', $short['body'], 'a too-short password should be rejected');
+        assert_field_error($short['body'], 'password', 'Use at least 12 characters', 'admin/reset-password.php');
+
+        // bcrypt only reads 72 bytes, so a longer password is refused rather than silently truncated
+        // (this used to be tested on the new-staff form, which no longer has a password field).
+        $long = str_repeat('p', 80);
+        $tooLong = $setPassword('/admin/reset-password.php', $token, $long, $long, 'cookies-pwreset-staff-set-long');
+        assert_field_error($tooLong['body'], 'password', 'Use at most 72 characters', 'admin/reset-password.php');
 
         $mismatch = $setPassword('/admin/reset-password.php', $token, 'a-brand-new-password-1', 'a-different-password-2', 'cookies-pwreset-staff-set2');
         assert_contains('has-error', $mismatch['body'], 'mismatched confirmation should be rejected');
+        assert_field_error($mismatch['body'], 'password_confirm', 'Passwords do not match', 'admin/reset-password.php');
+        assert_no_field_error($mismatch['body'], 'password', 'a valid password is not flagged');
 
         $ok = $setPassword('/admin/reset-password.php', $token, 'a-brand-new-password-1', 'a-brand-new-password-1', 'cookies-pwreset-staff-set3');
         assert_contains('Your password has been changed', $ok['body']);
+
+        // Finishing a reset is that staff member acting, so it is logged as them (id + name) -
+        // not as an anonymous 'public' row with no way to tell who it was.
+        $staffRow = $env->pdo()->query("SELECT id, name FROM staff_users WHERE email = 'staff@example.test'")->fetch();
+        $audit = $env->pdo()->prepare("SELECT actor_type, actor_id, actor_name FROM audit_log WHERE action = 'password_reset_completed' AND entity_type = 'staff_user' AND entity_id = ? ORDER BY id DESC LIMIT 1");
+        $audit->execute([$staffRow['id']]);
+        $auditRow = $audit->fetch();
+        $audit->closeCursor(); // an unfinished read would keep a lock on the SQLite file and block the server's next write
+        assert_equal('staff', $auditRow['actor_type']);
+        assert_equal((int) $staffRow['id'], (int) $auditRow['actor_id']);
+        assert_equal($staffRow['name'], $auditRow['actor_name']);
 
         $newLogin = $login('/admin/login.php', 'staff@example.test', 'a-brand-new-password-1', 'cookies-pwreset-staff-login-new');
         assert_equal(302, $newLogin['status'], 'the new password should sign in');
@@ -131,6 +151,10 @@ return function (TestEnv $env): void {
         $email = $env->lastDryRunEmailTo('portal.vet@example.test');
         assert_true((bool) preg_match('#/for-veterinarians/reset-password\.php\?token=([a-f0-9]+)#', $email['body'], $m), 'vet reset link missing');
 
+        $short = $setPassword('/for-veterinarians/reset-password.php', $m[1], 'short', 'shorter', 'cookies-pwreset-vet-set-bad');
+        assert_field_error($short['body'], 'password', 'Use at least 12 characters', 'for-veterinarians/reset-password.php');
+        assert_field_error($short['body'], 'password_confirm', 'Passwords do not match', 'for-veterinarians/reset-password.php');
+
         $ok = $setPassword('/for-veterinarians/reset-password.php', $m[1], 'a-new-vet-password-1', 'a-new-vet-password-1', 'cookies-pwreset-vet-set');
         assert_contains('Your password has been changed', $ok['body']);
 
@@ -151,6 +175,35 @@ return function (TestEnv $env): void {
         (function () use ($env) {
             $env->pdo()->exec("UPDATE vet_accounts SET status = 'active' WHERE email = 'portal.vet@example.test'");
         })();
+    });
+
+    run_test('a vet who never activated gets no reset email, but the confirmation tells everyone where to find their activation link (identical for any address)', function () use ($env, $requestReset, $countEmailsTo) {
+        // Only active accounts get a reset (a pending one needs the activation link staff issue), so a vet who lost the
+        // approval email waited for nothing. The hint is part of the confirmation shown to EVERY address (a Karandeep
+        // review comment), so it cannot reveal who has an account.
+        // Earlier tests used up this address's 3 resets an hour: start clean, or the "active" request below would be
+        // rate limited and never reach the branch that sends an email (a mutation check caught exactly that gap).
+        $env->pdo()->exec("DELETE FROM rate_limit_hits WHERE bucket LIKE 'pw_reset_%'");
+        $env->pdo()->exec("UPDATE vet_accounts SET status = 'pending_activation' WHERE email = 'portal.vet@example.test'");
+        try {
+            $before = $countEmailsTo('portal.vet@example.test');
+            $pending =$requestReset('/for-veterinarians/forgot-password.php', 'portal.vet@example.test', 'cookies-pwreset-vet-pending');
+            assert_equal($before, $countEmailsTo('portal.vet@example.test'), 'a pending account still gets no reset email: activation is the staff-issued link');
+        } finally {
+            $env->pdo()->exec("UPDATE vet_accounts SET status = 'active' WHERE email = 'portal.vet@example.test'");
+        }
+        $unknown = $requestReset('/for-veterinarians/forgot-password.php', 'nobody.at.all@example.test', 'cookies-pwreset-vet-unknown');
+        $sentBefore = $countEmailsTo('portal.vet@example.test');
+        $active  = $requestReset('/for-veterinarians/forgot-password.php', 'portal.vet@example.test', 'cookies-pwreset-vet-activehint');
+        assert_equal($sentBefore + 1, $countEmailsTo('portal.vet@example.test'), 'the active account really was sent its reset email, so this case exercises that branch');
+        $box = fn (string $h): string => preg_match('#<div class="alert alert-ok">(.*?)</div>#s', $h, $m) ? trim($m[1]) : '';
+        foreach (['a pending account' => $pending, 'an unknown address' => $unknown, 'an active account' => $active] as $what => $r) {
+            assert_contains("Haven't activated your account yet? Use the link from your approval email, or write to", htmlspecialchars_decode($r['body'], ENT_QUOTES), "{$what}: the hint is shown");
+            assert_contains('<a href="mailto:ops@kuronyx.in"', $r['body'], "{$what}: it names the address to write to");
+            assert_contains('If a veterinary portal account exists', $r['body']);
+        }
+        assert_equal($box($pending['body']), $box($unknown['body']), 'a pending account and an unknown address get exactly the same message');
+        assert_equal($box($active['body']), $box($unknown['body']), 'and so does an active one');
     });
 
     run_test('a session already logged in before a reset is invalidated by it, without needing a fresh login', function () use ($env, $requestReset, $setPassword, $login) {

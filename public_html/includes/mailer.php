@@ -5,8 +5,19 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
 }
 
 require_once __DIR__ . '/db.php';
+require_once __DIR__ . '/mail-outcome.php';
 
-class MailException extends \RuntimeException {}
+// $outcome says what is known about the email: 'not_sent' (default: Brevo refused it, or it never left) or 'unknown'
+// (the request went out but no answer came back, so it MAY have been sent) - see mail_send_outcome().
+class MailException extends \RuntimeException {
+    public string $outcome = 'not_sent';
+
+    public static function unknown(string $message): self {
+        $e = new self($message);
+        $e->outcome = 'unknown';
+        return $e;
+    }
+}
 
 // The admin email templates deliberately contain bracketed fill-in-the-blank markers
 // ([insert payment link], [confirm final price], [courier name], [tracking number],
@@ -42,6 +53,18 @@ function send_transactional_email(string $toEmail, string $toName, string $subje
     $fromName = $fromName ?? $senders[$fromEmail];
 
     if (defined('EMAIL_DRY_RUN') && EMAIL_DRY_RUN) {
+        // EMAIL_DRY_RUN_FAIL_TO is, like EMAIL_DRY_RUN_LOG, only ever defined by the test harness: sending to
+        // exactly that address fails the way a Brevo outage would, so the "the email did not go out" paths
+        // (e.g. a staff invitation) can be tested. Never set in a real db-config.php.
+        if (defined('EMAIL_DRY_RUN_FAIL_TO') && EMAIL_DRY_RUN_FAIL_TO !== '' && strcasecmp($toEmail, EMAIL_DRY_RUN_FAIL_TO) === 0) {
+            // Like a real Brevo error, the message ECHOES the address, so the tests can check it never reaches the error log.
+            throw new MailException("Simulated send failure for {$toEmail} (EMAIL_DRY_RUN_FAIL_TO).");
+        }
+        // Likewise EMAIL_DRY_RUN_UNKNOWN_TO (test harness only): the request "went out" but no answer came back, so the
+        // message may have been sent - the case the "may not have been sent" paths are tested with.
+        if (defined('EMAIL_DRY_RUN_UNKNOWN_TO') && EMAIL_DRY_RUN_UNKNOWN_TO !== '' && strcasecmp($toEmail, EMAIL_DRY_RUN_UNKNOWN_TO) === 0) {
+            throw MailException::unknown("Simulated unconfirmed send for {$toEmail} (EMAIL_DRY_RUN_UNKNOWN_TO).");
+        }
         // EMAIL_DRY_RUN_LOG is only ever defined by the test harness (tests/lib/server.php)
         // so it can read back what would have been sent — e.g. to pull an activation link
         // out of an email body without a real inbox.
@@ -68,14 +91,20 @@ function send_transactional_email(string $toEmail, string $toName, string $subje
             'api-key: ' . BREVO_API_KEY,
             'content-type: application/json',
         ],
+        CURLOPT_CONNECTTIMEOUT => 10, // a connection that cannot even be made is a clean "not sent", not a doubtful one
         CURLOPT_TIMEOUT => 15,
     ]);
     $response = curl_exec($ch);
-    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $curlErrno = curl_errno($ch);
+    $curlError = curl_error($ch);
+    $httpCode = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $handshakeDone = curl_getinfo($ch, CURLINFO_APPCONNECT_TIME) > 0;
     curl_close($ch);
 
-    if ($httpCode !== 201) {
-        throw new MailException("Brevo email send failed (HTTP {$httpCode}): {$response}");
+    $outcome = mail_send_outcome($httpCode, $handshakeDone);
+    if ($outcome !== 'sent') {
+        $message = "Brevo email send failed (HTTP {$httpCode}" . ($curlErrno ? ", curl {$curlErrno}: {$curlError}" : '') . "): {$response}";
+        throw $outcome === 'unknown' ? MailException::unknown($message) : new MailException($message);
     }
     $data = json_decode($response, true);
     return $data['messageId'] ?? '';
@@ -96,7 +125,10 @@ function send_transactional_email(string $toEmail, string $toName, string $subje
 // a log entry always exists from the moment a send is attempted, whatever happens next —
 // and a row stuck on 'sending' is itself diagnostic (the log INSERT worked but something
 // after it didn't), rather than a silent gap.
-function send_case_email(PDO $pdo, int $gsRequestId, ?int $staffId, string $recipient, string $recipientName, string $subject, string $body, ?string $senderEmail = null): bool {
+//
+// Returns 'sent', 'failed' (we know nothing went out) or 'unknown' (the request went out but no answer came back, so
+// the email MAY have been sent: the row is marked 'unknown', never 'failed', so nobody re-sends it blindly).
+function send_case_email(PDO $pdo, int $gsRequestId, ?int $staffId, string $recipient, string $recipientName, string $subject, string $body, ?string $senderEmail = null): string {
     $senderEmail = $senderEmail ?? SENDER_EMAIL;
     $stmt = $pdo->prepare(
         "INSERT INTO case_emails (gs_request_id, staff_id, recipient, sender, subject, body, delivery_status) VALUES (?,?,?,?,?,?,'sending')"
@@ -107,15 +139,17 @@ function send_case_email(PDO $pdo, int $gsRequestId, ?int $staffId, string $reci
     try {
         $messageId = send_transactional_email($recipient, $recipientName, $subject, $body, $senderEmail);
     } catch (Throwable $e) {
-        // Any failure *before or during* the send (not just MailException: a curl or runtime
-        // error too) means nothing went out.
-        error_log("[mailer] case email to {$recipient} (GS-{$gsRequestId}) failed: " . $e->getMessage());
+        // A failure *before or during* the send (not just MailException: a curl or runtime error too) means nothing went
+        // out - EXCEPT when the request was sent and no answer came back (a timeout, a dropped connection): then the email
+        // may have been accepted, and calling that "failed" made staff click Send again and mail the owner twice.
+        $status = ($e instanceof MailException && $e->outcome === 'unknown') ? 'unknown' : 'failed';
+        error_log("[mailer] case email #{$logId} (GS-{$gsRequestId}) {$status}: " . log_safe($e->getMessage()));
         try {
-            $pdo->prepare("UPDATE case_emails SET delivery_status = 'failed' WHERE id = ?")->execute([$logId]);
+            $pdo->prepare("UPDATE case_emails SET delivery_status = ? WHERE id = ?")->execute([$status, $logId]);
         } catch (Throwable $logError) {
-            error_log("[mailer] could not mark case_emails #{$logId} failed: " . $logError->getMessage());
+            error_log("[mailer] could not mark case_emails #{$logId} {$status}: " . log_safe($logError->getMessage()));
         }
-        return false;
+        return $status;
     }
 
     // The email has gone out. Failing to record that must not surface as an error (staff
@@ -124,7 +158,7 @@ function send_case_email(PDO $pdo, int $gsRequestId, ?int $staffId, string $reci
     try {
         $pdo->prepare("UPDATE case_emails SET delivery_status = 'sent', brevo_message_id = ? WHERE id = ?")->execute([$messageId, $logId]);
     } catch (Throwable $e) {
-        error_log("[mailer] case email #{$logId} to {$recipient} WAS SENT but its log row could not be updated: " . $e->getMessage());
+        error_log("[mailer] case email #{$logId} (GS-{$gsRequestId}) WAS SENT but its log row could not be updated: " . log_safe($e->getMessage()));
     }
-    return true;
+    return 'sent';
 }

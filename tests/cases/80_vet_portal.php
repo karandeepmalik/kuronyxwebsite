@@ -1,5 +1,10 @@
 <?php
 return function (TestEnv $env): void {
+    // The privacy policy's fingerprint, worked out the same way the site does.
+    function privacy_policy_version_for_tests(TestEnv $env): string {
+        return 'pp-' . substr(hash_file('sha256', $env->root . '/public_html/Privacy Policy.html'), 0, 16);
+    }
+
     run_test('portal pages redirect an anonymous visitor to vet login', function () use ($env) {
         $r = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/', ['cookie_jar' => $env->tmpDir . '/cookies-vetanon.txt']);
         assert_equal(302, $r['status']);
@@ -33,9 +38,9 @@ return function (TestEnv $env): void {
         $jarStaff = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['cookie_jar' => $jarStaff]);
         $csrf = extract_csrf($view['body']);
-        $approve = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+        $approve = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['follow' => true, 
             'cookie_jar' => $jarStaff,
-            'body' => ['csrf_token' => $csrf, 'action' => 'approve', 'note' => ''],
+            'body' => ['csrf_token' => $csrf, 'expected_status' => extract_expected_status($view['body']), 'action' => 'approve', 'note' => 'Verified in test.'],
         ]);
         assert_contains('portal account has been created', $approve['body']);
         assert_true(strpos($approve['body'], 'notified by email') === false, 'approving no longer sends anything automatically');
@@ -48,7 +53,7 @@ return function (TestEnv $env): void {
         // send it manually through the same template/sender/recipient compose panel
         // used everywhere else.
         $csrf2 = extract_csrf($approve['body']);
-        $gen = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+        $gen = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['follow' => true, 
             'cookie_jar' => $jarStaff,
             'body' => ['csrf_token' => $csrf2, 'action' => 'generate_activation_link', 'note' => ''],
         ]);
@@ -57,7 +62,7 @@ return function (TestEnv $env): void {
 
         $csrf3 = extract_csrf($gen['body']);
         $ott3  = extract_ott($gen['body']);
-        $send = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+        $send = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['follow' => true, 
             'cookie_jar' => $jarStaff,
             'body' => [
                 'csrf_token' => $csrf3, 'ott' => $ott3, 'action' => 'send_email', 'sender' => 'hello@kuronyx.in',
@@ -81,6 +86,15 @@ return function (TestEnv $env): void {
         assert_contains('Set a password', $get['body']);
         $csrf = extract_csrf($get['body']);
 
+        // A bad first attempt tells the vet what is wrong (the messages used to be set and never printed),
+        // and does not use up the link.
+        $bad = http_request('POST', $env->baseUrl . '/for-veterinarians/activate.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => $csrf, 'token' => $token, 'password' => 'tooshort', 'password_confirm' => 'different'],
+        ]);
+        assert_field_error($bad['body'], 'password', 'Use at least 12 characters', 'activate.php');
+        assert_field_error($bad['body'], 'password_confirm', 'Passwords do not match', 'activate.php');
+
         $post = http_request('POST', $env->baseUrl . '/for-veterinarians/activate.php', [
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'token' => $token, 'password' => 'vet-portal-password-1', 'password_confirm' => 'vet-portal-password-1'],
@@ -93,6 +107,23 @@ return function (TestEnv $env): void {
         $token = $env->shared['vetActivationToken'];
         $r = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $token, ['cookie_jar' => $env->tmpDir . '/cookies-activate2.txt']);
         assert_contains('invalid or has expired', $r['body']);
+    });
+
+    run_test('a vet who clicks the emailed link a second time is pointed to the login page, and so is any other dead link, with the same words', function () use ($env) {
+        // Activation clears the token, so a used link is indistinguishable from a wrong or expired one: the hint is the
+        // same for all of them and reveals nothing about whether an account exists (a Karandeep review comment).
+        $loginLink = '<a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Log in here</a>';
+        $spent = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . $env->shared['vetActivationToken'], ['cookie_jar' => $env->tmpDir . '/cookies-activate3.txt'])['body'];
+        $bogus = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php?token=' . str_repeat('ab', 32), ['cookie_jar' => $env->tmpDir . '/cookies-activate4.txt'])['body'];
+        $none  = http_request('GET', $env->baseUrl . '/for-veterinarians/activate.php', ['cookie_jar' => $env->tmpDir . '/cookies-activate5.txt'])['body'];
+        foreach (['a used link' => $spent, 'a made-up link' => $bogus, 'no token at all' => $none] as $what => $html) {
+            assert_contains('Already activated? ' . $loginLink, $html, "{$what} points to the login page");
+            assert_contains('mailto:ops@kuronyx.in', $html, "{$what} still says who to ask for a new link");
+        }
+        // The message is identical whichever it is: it says nothing about which kind of bad link this was.
+        $strip = fn (string $h): string => preg_match('#<div class="alert">(.*?)</div>#s', $h, $m) ? $m[1] : '';
+        assert_equal($strip($spent), $strip($bogus), 'a used link and a made-up one get exactly the same message');
+        assert_equal($strip($spent), $strip($none));
     });
 
     run_test('the vet can sign in and reaches an empty dashboard', function () use ($env) {
@@ -128,6 +159,24 @@ return function (TestEnv $env): void {
         assert_equal(200, $post['status']);
         assert_contains('has-error', $post['body']);
         assert_contains('Please check the highlighted fields', $post['body']);
+    });
+
+    run_test('vet portal request form: messages under the fields and the refused file named', function () use ($env) {
+        $jar = $env->shared['vetPortalJar'];
+        $get = http_request('GET', $env->baseUrl . '/for-veterinarians/portal/new-request.php', ['cookie_jar' => $jar]);
+        $post = http_request('POST', $env->baseUrl . '/for-veterinarians/portal/new-request.php', [
+            'cookie_jar' => $jar,
+            'body' => ['csrf_token' => extract_csrf($get['body']), 'ott' => extract_ott($get['body']), 'owner_email' => 'x', 'owner_phone' => '12', 'patient_weight_kg' => 'heavy'],
+        ]);
+        $b = $post['body'];
+        assert_field_error($b, 'owner_full_name', 'Please fill this in', 'portal');
+        assert_field_error($b, 'owner_email', 'Enter a valid email address', 'portal');
+        assert_field_error($b, 'owner_phone', 'Enter a valid phone number', 'portal');
+        assert_field_error($b, 'patient_weight_kg', 'Enter a valid weight (up to 999.99 kg)', 'portal');
+        assert_field_error($b, 'requested_formulation', 'Select a formulation', 'portal');
+        assert_field_error($b, 'prescription', 'A prescription upload is required', 'portal');
+        assert_field_error($b, 'consent', 'Please confirm the attestation to submit this request', 'portal');
+        assert_contains('querySelector(\'[aria-invalid="true"]\')', $b);
     });
 
     run_test('the vet portal also rejects a calendar-invalid date of birth instead of silently rolling it over', function () use ($env) {
@@ -222,6 +271,21 @@ return function (TestEnv $env): void {
         assert_equal($accountId, (int) $row['vet_account_id']);
         $env->shared['vetGsRequestId'] = (int) $row['id'];
 
+        // What the vet ticked is an ATTESTATION, recorded as its own type with the version of the WORDING on the page - not as the
+        // pet owner's privacy consent (a Karandeep review comment). The owner agreed to nothing on this form.
+        $consents = $env->pdo()->prepare('SELECT consent_type, consent_text_version, ip_address, user_agent FROM consent_records WHERE gs_request_id = ? ORDER BY id');
+        $consents->execute([$row['id']]);
+        $consents = $consents->fetchAll(PDO::FETCH_ASSOC);
+        assert_equal(1, count($consents), 'exactly one record for the vet\'s tick');
+        assert_equal('vet_attestation', $consents[0]['consent_type'], 'recorded as the vet\'s attestation, not as case_processing (the owner\'s privacy consent)');
+        // The version fingerprints the exact words of the checkbox as printed on the page.
+        preg_match('#<label for="consent">(.*?)</label>#s', $get['body'], $label);
+        $words = html_entity_decode($label[1] ?? '', ENT_QUOTES);
+        assert_contains('treating veterinarian', $words);
+        assert_equal('att-' . substr(hash('sha256', $words), 0, 16), $consents[0]['consent_text_version'], 'the version identifies the attestation wording');
+        assert_true($consents[0]['consent_text_version'] !== privacy_policy_version_for_tests($env), 'and it is not the privacy policy fingerprint');
+        assert_true($consents[0]['ip_address'] !== null && $consents[0]['ip_address'] !== '', 'when and from where is still recorded');
+
         $docCount = (int) $env->scalar(
             "SELECT COUNT(*) FROM gs_request_documents WHERE gs_request_id = ? AND doc_type = 'prescription'",
             [$row['id']]
@@ -252,9 +316,9 @@ return function (TestEnv $env): void {
         $jarStaff = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['cookie_jar' => $jarStaff]);
         $csrf = extract_csrf($view['body']);
-        http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+        http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['follow' => true, 
             'cookie_jar' => $jarStaff,
-            'body' => ['csrf_token' => $csrf, 'action' => 'suspend', 'note' => ''],
+            'body' => ['csrf_token' => $csrf, 'expected_status' => extract_expected_status($view['body']), 'action' => 'suspend', 'note' => 'Suspended in test.'],
         ]);
         assert_equal('suspended', $env->scalar("SELECT status FROM vet_accounts WHERE email = 'portal.vet@example.test'"));
 
@@ -291,9 +355,9 @@ return function (TestEnv $env): void {
         $jarStaff = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['cookie_jar' => $jarStaff]);
         $csrf = extract_csrf($view['body']);
-        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", [
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$appId}", ['follow' => true, 
             'cookie_jar' => $jarStaff,
-            'body' => ['csrf_token' => $csrf, 'action' => 'approve', 'note' => ''],
+            'body' => ['csrf_token' => $csrf, 'expected_status' => extract_expected_status($view['body']), 'action' => 'approve', 'note' => 'Verified in test.'],
         ]);
         assert_contains('reactivated', $post['body']);
         assert_equal('active', $env->scalar('SELECT status FROM vet_accounts WHERE vet_application_id = ?', [$appId]), 'an already-passworded account should go straight back to active, not pending_activation');

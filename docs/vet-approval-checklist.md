@@ -29,12 +29,12 @@ check against.
 
 ## If anything doesn't match
 
-Use **Request More Information** (and the email composer) or **Reject**. Do not approve "to sort
+Use **Request More Information** (available while the application is Pending; after that, use the note box and the email composer to keep asking) or **Reject**. Do not approve "to sort
 it out later": approval is what unlocks the portal.
 
 ## Recording it
 
-Put one line in the Note box when approving, for example:
+Put one line in the Note box when approving, for example (the page refuses Approve, Reject and Suspend with an empty note, so there is always a record):
 `Certificate MH-VET-1234 checked against MSVC register 02 Oct; called clinic on 020-xxxxxxx, confirmed.`
 The note is appended to the application's internal notes with the date and your name.
 

@@ -17,6 +17,7 @@ return function (TestEnv $env): void {
         $lockVersion = $env->scalar('SELECT lock_version FROM gs_requests WHERE id = ?', [$id]);
 
         $statusPost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'change_status', 'new_status' => 'under_review', 'status_note' => 'Reviewing prescription', 'expected_lock_version' => $lockVersion],
         ]);
@@ -24,6 +25,7 @@ return function (TestEnv $env): void {
         assert_equal('under_review', $env->pdo()->query("SELECT status FROM gs_requests WHERE id = {$id}")->fetchColumn());
 
         $notePost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'add_note', 'content' => 'Called the clinic to confirm.'],
         ]);
@@ -34,6 +36,7 @@ return function (TestEnv $env): void {
         // rather than reusing whatever value the original GET at the top of this test saw.
         $expectedLockVersion = $env->scalar('SELECT lock_version FROM gs_requests WHERE id = ?', [$id]);
         $finalPost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => [
                 'csrf_token' => $csrf, 'action' => 'update_final', 'expected_lock_version' => $expectedLockVersion,
@@ -77,6 +80,7 @@ return function (TestEnv $env): void {
         $env->pdo()->prepare("UPDATE gs_requests SET courier = 'InterimCourier', lock_version = lock_version + 1 WHERE id = ?")->execute([$id]);
 
         $stalePost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => [
                 'csrf_token' => $csrf, 'action' => 'update_final', 'expected_lock_version' => $staleLockVersion,
@@ -91,6 +95,7 @@ return function (TestEnv $env): void {
         $freshLockVersion = $env->scalar('SELECT lock_version FROM gs_requests WHERE id = ?', [$id]);
         $csrf2 = extract_csrf($stalePost['body']);
         $freshPost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => [
                 'csrf_token' => $csrf2, 'action' => 'update_final', 'expected_lock_version' => $freshLockVersion,
@@ -121,6 +126,7 @@ return function (TestEnv $env): void {
 
         // A stale submission must be rejected outright.
         $stalePost = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'change_status', 'new_status' => 'cancelled', 'status_note' => '', 'expected_lock_version' => $staleLockVersion - 1],
         ]);
@@ -132,6 +138,7 @@ return function (TestEnv $env): void {
 
         $csrf2 = extract_csrf($stalePost['body']);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf2, 'action' => 'change_status', 'new_status' => 'formulation_discussion', 'status_note' => '', 'expected_lock_version' => $freshLockVersion],
         ]);

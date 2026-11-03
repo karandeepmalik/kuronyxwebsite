@@ -130,7 +130,7 @@ if ($httpCode === 201 || $httpCode === 204 || $httpCode === 200) {
     http_response_code(500);
     $logData['status'] = 'failed_api_error';
     file_put_contents($logFile, json_encode($logData) . PHP_EOL, FILE_APPEND | LOCK_EX);
-    error_log('[webhook] Brevo contact upsert failed (HTTP ' . $httpCode . '): ' . $response);
+    error_log('[webhook] Brevo contact upsert failed (HTTP ' . $httpCode . '): ' . log_safe((string) $response));
     echo json_encode([
         'success' => false,
         'message' => 'Failed to create contact in Brevo.',

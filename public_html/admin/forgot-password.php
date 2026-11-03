@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'body' => "We received a request to reset the password for your Kuronyx staff account.\n\n"
                             . 'Set a new password (link valid for ' . PASSWORD_RESET_TTL_MINUTES . " minutes, single use):\n"
                             . site_url() . '/admin/reset-password.php?token=' . $token . "\n\n"
-                            . "If you didn't request this, you can ignore this email — your password stays unchanged.",
+                            . "If you didn't request this, you can ignore this email - your password stays unchanged.",
                     ];
                 } else {
                     // Do the same kind of work the real-account branch above does (a token write
@@ -62,7 +62,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle     = 'Forgot Password — Kuronyx Admin';
+$pageTitle     = 'Forgot Password - Kuronyx Admin';
 $robotsNoindex = true;
 $backHref      = '/admin/login.php';
 $backLabel     = 'Back to sign in';
@@ -111,7 +111,7 @@ if ($deferredEmail !== null) {
     try {
         send_transactional_email($deferredEmail['to'], $deferredEmail['name'], $deferredEmail['subject'], $deferredEmail['body']);
     } catch (MailException $e) {
-        error_log('[password-reset] staff email failed: ' . $e->getMessage());
+        error_log('[password-reset] staff email failed: ' . log_safe($e->getMessage()));
     }
 }
 

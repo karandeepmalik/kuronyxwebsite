@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/form-errors.php';
 
 csrf_token();
 
@@ -36,16 +37,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
     }
 }
 
-$pageTitle     = 'Reset Password — Kuronyx Sciences';
+$pageTitle     = 'Set a new password | Kuronyx';
 $robotsNoindex = true;
 $activeNav     = 'for-veterinarians';
 require __DIR__ . '/../includes/layout-header.php';
 ?>
-    <p class="doc-eyebrow">For veterinarians · Portal sign in</p>
+    <p class="doc-eyebrow">For veterinarians · Portal log in</p>
     <h1 class="doc-title">Set a new password</h1>
 
     <?php if ($done): ?>
-      <div class="alert alert-ok">Your password has been changed. <a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Sign in</a> with the new one.</div>
+      <div class="alert alert-ok">Your password has been changed. <a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Log in</a> with the new one.</div>
     <?php elseif (!$account): ?>
       <div class="alert">This reset link is invalid or has expired. <a href="/for-veterinarians/forgot-password.php" style="color:#ffb3b3;">Request a new one</a>.</div>
     <?php else: ?>
@@ -56,15 +57,17 @@ require __DIR__ . '/../includes/layout-header.php';
       <form method="POST" novalidate>
         <?= csrf_field() ?>
         <input type="hidden" name="token" value="<?= htmlspecialchars($rawToken, ENT_QUOTES) ?>">
-        <label class="field <?= isset($errors['password']) ? 'has-error' : '' ?>">
+        <label class="<?= field_class($errors, 'password') ?>">
           <span class="lbl">New password (min. 12 characters)</span>
-          <input type="password" name="password" required minlength="12" autofocus>
+          <input type="password" name="password" required minlength="12" autofocus<?= field_error_attrs($errors, 'password') ?>>
+          <?= field_error_html($errors, 'password') ?>
         </label>
-        <label class="field <?= isset($errors['password_confirm']) ? 'has-error' : '' ?>">
+        <label class="<?= field_class($errors, 'password_confirm') ?>">
           <span class="lbl">Confirm new password</span>
-          <input type="password" name="password_confirm" required minlength="12">
+          <input type="password" name="password_confirm" required minlength="12"<?= field_error_attrs($errors, 'password_confirm') ?>>
+          <?= field_error_html($errors, 'password_confirm') ?>
         </label>
-        <button type="submit" class="btn-primary" style="margin-top:1rem;">Change Password</button>
+        <button type="submit" class="btn-primary" style="margin-top:1rem;">Change password</button>
       </form>
     <?php endif; ?>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

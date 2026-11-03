@@ -9,6 +9,7 @@
 // this file there for the duration of a run.
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/form-errors.php';
 
 // This page creates the first admin account with no login required, so an empty
 // staff_users table alone is not enough of a gate — this URL is permanent and
@@ -34,7 +35,7 @@ $alreadySetUp = (int) db()->query('SELECT COUNT(*) FROM setup_lock')->fetchColum
 $errors = [];
 
 if ($alreadySetUp) {
-    $pageTitle     = 'Setup — Kuronyx Admin';
+    $pageTitle     = 'Setup - Kuronyx Admin';
     $robotsNoindex = true;
     $backHref      = '/admin/login.php';
     $backLabel     = 'Go to sign in';
@@ -100,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } catch (PDOException $e) {
                 $pdo->rollBack();
-                if ($e->getCode() === '23000') {
+                if (is_unique_violation($e, 'setup_lock', 'id', true)) {
                     // The setup_lock row already existed — a concurrent request got there
                     // first. Nothing was left half-done, since the whole attempt (including
                     // the lock claim) just rolled back together.
@@ -117,7 +118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle     = 'Setup — Kuronyx Admin';
+$pageTitle     = 'Setup - Kuronyx Admin';
 $robotsNoindex = true;
 $backHref      = '/';
 $backLabel     = 'Back to site';
@@ -134,21 +135,25 @@ require __DIR__ . '/../includes/layout-header.php';
     <form method="POST" novalidate>
       <?= csrf_field() ?>
       <input type="hidden" name="token" value="<?= htmlspecialchars($_GET['token'] ?? '', ENT_QUOTES) ?>">
-      <label class="field <?= isset($errors['name']) ? 'has-error' : '' ?>">
+      <label class="<?= field_class($errors, 'name') ?>">
         <span class="lbl">Name</span>
-        <input type="text" name="name" value="<?= htmlspecialchars($_POST['name'] ?? '', ENT_QUOTES) ?>" required>
+        <input type="text" name="name" value="<?= htmlspecialchars($_POST['name'] ?? '', ENT_QUOTES) ?>" required<?= field_error_attrs($errors, 'name') ?>>
+        <?= field_error_html($errors, 'name') ?>
       </label>
-      <label class="field <?= isset($errors['email']) ? 'has-error' : '' ?>">
+      <label class="<?= field_class($errors, 'email') ?>">
         <span class="lbl">Email</span>
-        <input type="email" name="email" value="<?= htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES) ?>" required>
+        <input type="email" name="email" value="<?= htmlspecialchars($_POST['email'] ?? '', ENT_QUOTES) ?>" required<?= field_error_attrs($errors, 'email') ?>>
+        <?= field_error_html($errors, 'email') ?>
       </label>
-      <label class="field <?= isset($errors['password']) ? 'has-error' : '' ?>">
+      <label class="<?= field_class($errors, 'password') ?>">
         <span class="lbl">Password (min. 12 characters)</span>
-        <input type="password" name="password" required minlength="12">
+        <input type="password" name="password" required minlength="12"<?= field_error_attrs($errors, 'password') ?>>
+        <?= field_error_html($errors, 'password') ?>
       </label>
-      <label class="field <?= isset($errors['password_confirm']) ? 'has-error' : '' ?>">
+      <label class="<?= field_class($errors, 'password_confirm') ?>">
         <span class="lbl">Confirm password</span>
-        <input type="password" name="password_confirm" required minlength="12">
+        <input type="password" name="password_confirm" required minlength="12"<?= field_error_attrs($errors, 'password_confirm') ?>>
+        <?= field_error_html($errors, 'password_confirm') ?>
       </label>
       <button type="submit" class="btn-primary" style="margin-top:1rem;">Create Admin Account</button>
     </form>

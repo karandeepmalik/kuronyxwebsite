@@ -3,7 +3,16 @@ require __DIR__ . '/../../includes/db.php';
 require __DIR__ . '/../../includes/auth.php';
 require __DIR__ . '/../../includes/upload.php';
 require __DIR__ . '/../../includes/data-protection.php';
+require_once __DIR__ . '/../../includes/orphan-uploads.php';
+require_once __DIR__ . '/../../includes/form-errors.php'; // field_class(), the per-field messages and the focus script
 $vet = require_vet_login();
+
+// The exact words of the attestation checkbox, printed by the label below and fingerprinted for the consent record.
+// Change them and the recorded version changes with them; do not retype them anywhere else.
+const VET_ATTESTATION_TEXT = 'I confirm I am the treating veterinarian for this patient and am authorising this GS-441524 compounding request on that basis.';
+function vet_attestation_version(): string {
+    return 'att-' . substr(hash('sha256', VET_ATTESTATION_TEXT), 0, 16);
+}
 
 $pdo = db();
 $vetApp = $pdo->prepare('SELECT * FROM vet_applications WHERE id = ? LIMIT 1');
@@ -13,6 +22,7 @@ $vetApp = $vetApp->fetch();
 csrf_token();
 
 $errors = [];
+// Raw POST until the early checks pass, then the cleaned `$fields` (see for-cat-owners/index.php). Keep it an array.
 $old    = $_POST ?? [];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -47,22 +57,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $required = ['owner_full_name','owner_email','owner_phone','owner_address','owner_city','owner_state','owner_pin','patient_name','requested_formulation'];
         foreach ($required as $key) {
-            if ($fields[$key] === '') $errors[$key] = 'Required';
+            if ($fields[$key] === '') $errors[$key] = 'Please fill this in';
         }
         // Column-size and format checks up front — without them an over-long value reaches the
         // INSERT, where MySQL throws (a 500 that loses the visitor's whole submission and
         // uploads) or, in non-strict mode, silently truncates it; and patient_sex only
         // survived because the DB's own ENUM/CHECK rejected anything else.
-        foreach (field_length_errors($fields, [
+        $limits = [
             'owner_full_name' => 150, 'owner_email' => 190, 'owner_phone' => 30, 'owner_address' => 255,
             'owner_city' => 100, 'owner_state' => 100, 'owner_pin' => 20, 'owner_country' => 100,
             'patient_name' => 100, 'patient_breed' => 100, 'patient_microchip' => 100, 'clinical_notes' => 20000,
             'vet_name' => 150, 'vet_clinic' => 190, 'vet_email' => 190, 'vet_phone' => 30, 'vet_registration_info' => 190,
-        ]) as $key) {
-            $errors[$key] = 'Too long';
+        ];
+        foreach (field_length_errors($fields, $limits) as $key) {
+            $errors[$key] = too_long_message($limits[$key]);
         }
         foreach (text_byte_errors($fields, ['clinical_notes']) as $key) {
-            $errors[$key] = 'Too long'; // TEXT column: the limit is in bytes, not characters
+            // TEXT column: the limit is in bytes, not characters (a long text in a non-English script reaches it sooner)
+            $errors[$key] = $errors[$key] ?? 'Too long - please shorten it';
         }
         if (!in_array($fields['patient_sex'], ['male', 'female', 'unknown'], true)) {
             $errors['patient_sex'] = 'Select a valid option';
@@ -104,13 +116,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $prescriptionUpload = null;
         $supportingUploads  = [];
-        if (empty($_FILES['prescription']['name'])) {
+        if (!upload_was_chosen('prescription')) {
             $errors['prescription'] = 'A prescription upload is required';
         } elseif (empty($errors)) {
+            $uploadField = 'prescription'; // which file was being checked if one is refused
             try {
                 $prescriptionUpload = store_uploaded_file($_FILES['prescription'], 'gs-requests/pending');
                 foreach (['supporting_1', 'supporting_2'] as $docField) {
-                    if (!empty($_FILES[$docField]['name'])) {
+                    $uploadField = $docField;
+                    if (upload_was_chosen($docField)) {
                         $supportingUploads[] = store_uploaded_file($_FILES[$docField], 'gs-requests/pending');
                     }
                 }
@@ -123,7 +137,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 foreach (array_merge($prescriptionUpload ? [$prescriptionUpload] : [], $supportingUploads) as $meta) {
                     delete_uploaded_file($meta['stored_filename'], 'gs-requests/pending');
                 }
-                $errors['_form'] = $e->getMessage();
+                // The reason is printed under the file that failed; the banner stays generic.
+                $errors[$uploadField] = $e->getMessage();
+                $errors['_form'] = 'Please check the highlighted fields below and try again.';
             }
         }
 
@@ -168,11 +184,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $docStmt->execute([$requestId, 'supporting', $meta['stored_filename'], $meta['original_filename'], $meta['mime_type'], $meta['size_bytes']]);
                 }
 
+                // What the vet ticked is an ATTESTATION ("I am the treating veterinarian and I authorise this request"), not the
+                // privacy consent a pet owner gives on the public form, so it is its own type and its version names the WORDING
+                // that was on the page (a fingerprint of VET_ATTESTATION_TEXT, so editing the words starts a new version, like
+                // the privacy policy's own). The pet owner whose details are in this case agreed to nothing here: see CLAUDE.md.
                 $consentStmt = $pdo->prepare(
                     'INSERT INTO consent_records (gs_request_id, consent_type, consent_text_version, ip_address, user_agent)
-                     VALUES (?, \'case_processing\', ?, ?, ?)'
+                     VALUES (?, \'vet_attestation\', ?, ?, ?)'
                 );
-                $consentStmt->execute([$requestId, privacy_policy_version(), client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
+                $consentStmt->execute([$requestId, vet_attestation_version(), client_ip(), substr($_SERVER['HTTP_USER_AGENT'] ?? '', 0, 255)]);
 
                 $pdo->prepare(
                     'INSERT INTO case_status_history (gs_request_id, previous_status, new_status, changed_by, note)
@@ -202,15 +222,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             if (empty($errors)) {
+                maybe_sweep_orphan_uploads(); // tidies uploads orphaned by a request that died (see includes/orphan-uploads.php); never breaks this one
                 header('Location: /for-veterinarians/portal/view.php?id=' . $requestId . '&submitted=1');
                 exit;
             }
         }
         $old = $fields;
+        $old['consent'] = $_POST['consent'] ?? ''; // not part of $fields: do not make them tick it again
     }
 }
 
-$pageTitle     = 'New GS-441524 Request — Kuronyx Veterinary Portal';
+$pageTitle     = 'New GS-441524 Request - Kuronyx Veterinary Portal';
 $robotsNoindex = true;
 $activeNav     = 'for-veterinarians';
 $backHref      = '/for-veterinarians/portal/';
@@ -218,8 +240,6 @@ $backLabel     = 'Your requests';
 $wideWrap      = true;
 require __DIR__ . '/../../includes/layout-header.php';
 
-function fc(array $errors, string $key): string { return 'field' . (isset($errors[$key]) ? ' has-error' : ''); }
-function ov(array $old, string $key): string { return htmlspecialchars($old[$key] ?? '', ENT_QUOTES); }
 ?>
     <p class="doc-eyebrow">Veterinary portal · New request</p>
     <h1 class="doc-title">Submit a GS-441524 request</h1>
@@ -236,79 +256,86 @@ function ov(array $old, string $key): string { return htmlspecialchars($old[$key
       <fieldset>
         <legend>Owner information</legend>
         <div class="field-row two">
-          <label class="<?= fc($errors, 'owner_full_name') ?>"><span class="lbl">Full name</span><input type="text" name="owner_full_name" value="<?= ov($old, 'owner_full_name') ?>" required></label>
-          <label class="<?= fc($errors, 'owner_email') ?>"><span class="lbl">Email</span><input type="email" name="owner_email" value="<?= ov($old, 'owner_email') ?>" required></label>
+          <label class="<?= field_class($errors, 'owner_full_name') ?>"><span class="lbl">Full name</span><input type="text" name="owner_full_name" value="<?= old_value($old, 'owner_full_name') ?>" required<?= field_error_attrs($errors, 'owner_full_name') ?>><?= field_error_html($errors, 'owner_full_name') ?></label>
+          <label class="<?= field_class($errors, 'owner_email') ?>"><span class="lbl">Email</span><input type="email" name="owner_email" value="<?= old_value($old, 'owner_email') ?>" required<?= field_error_attrs($errors, 'owner_email') ?>><?= field_error_html($errors, 'owner_email') ?></label>
         </div>
         <div class="field-row two">
-          <label class="<?= fc($errors, 'owner_phone') ?>"><span class="lbl">Mobile number</span><input type="tel" name="owner_phone" value="<?= ov($old, 'owner_phone') ?>" required></label>
-          <label class="<?= fc($errors, 'owner_address') ?>"><span class="lbl">Address</span><input type="text" name="owner_address" value="<?= ov($old, 'owner_address') ?>" required></label>
+          <label class="<?= field_class($errors, 'owner_phone') ?>"><span class="lbl">Mobile number</span><input type="tel" name="owner_phone" value="<?= old_value($old, 'owner_phone') ?>" required<?= field_error_attrs($errors, 'owner_phone') ?>><?= field_error_html($errors, 'owner_phone') ?></label>
+          <label class="<?= field_class($errors, 'owner_address') ?>"><span class="lbl">Address</span><input type="text" name="owner_address" value="<?= old_value($old, 'owner_address') ?>" required<?= field_error_attrs($errors, 'owner_address') ?>><?= field_error_html($errors, 'owner_address') ?></label>
         </div>
         <div class="field-row three">
-          <label class="<?= fc($errors, 'owner_city') ?>"><span class="lbl">City</span><input type="text" name="owner_city" value="<?= ov($old, 'owner_city') ?>" required></label>
-          <label class="<?= fc($errors, 'owner_state') ?>"><span class="lbl">State</span><input type="text" name="owner_state" value="<?= ov($old, 'owner_state') ?>" required></label>
-          <label class="<?= fc($errors, 'owner_pin') ?>"><span class="lbl">PIN</span><input type="text" name="owner_pin" value="<?= ov($old, 'owner_pin') ?>" required></label>
+          <label class="<?= field_class($errors, 'owner_city') ?>"><span class="lbl">City</span><input type="text" name="owner_city" value="<?= old_value($old, 'owner_city') ?>" required<?= field_error_attrs($errors, 'owner_city') ?>><?= field_error_html($errors, 'owner_city') ?></label>
+          <label class="<?= field_class($errors, 'owner_state') ?>"><span class="lbl">State</span><input type="text" name="owner_state" value="<?= old_value($old, 'owner_state') ?>" required<?= field_error_attrs($errors, 'owner_state') ?>><?= field_error_html($errors, 'owner_state') ?></label>
+          <label class="<?= field_class($errors, 'owner_pin') ?>"><span class="lbl">PIN</span><input type="text" name="owner_pin" value="<?= old_value($old, 'owner_pin') ?>" required<?= field_error_attrs($errors, 'owner_pin') ?>><?= field_error_html($errors, 'owner_pin') ?></label>
         </div>
-        <label class="field"><span class="lbl">Country</span><input type="text" name="owner_country" value="<?= ov($old, 'owner_country') ?: 'India' ?>"></label>
+        <label class="field"><span class="lbl">Country</span><input type="text" name="owner_country" value="<?= old_value($old, 'owner_country') ?: 'India' ?>"></label>
       </fieldset>
 
       <fieldset>
         <legend>Patient</legend>
         <div class="field-row two">
-          <label class="<?= fc($errors, 'patient_name') ?>"><span class="lbl">Cat's name</span><input type="text" name="patient_name" value="<?= ov($old, 'patient_name') ?>" required></label>
-          <label class="field"><span class="lbl">Breed</span><input type="text" name="patient_breed" value="<?= ov($old, 'patient_breed') ?>"></label>
+          <label class="<?= field_class($errors, 'patient_name') ?>"><span class="lbl">Cat's name</span><input type="text" name="patient_name" value="<?= old_value($old, 'patient_name') ?>" required<?= field_error_attrs($errors, 'patient_name') ?>><?= field_error_html($errors, 'patient_name') ?></label>
+          <label class="field"><span class="lbl">Breed</span><input type="text" name="patient_breed" value="<?= old_value($old, 'patient_breed') ?>"></label>
         </div>
         <div class="field-row three">
-          <label class="field">
+          <label class="<?= field_class($errors, 'patient_sex') ?>">
             <span class="lbl">Sex</span>
-            <select name="patient_sex">
+            <select name="patient_sex"<?= field_error_attrs($errors, 'patient_sex') ?>>
               <?php foreach (['unknown' => 'Unknown', 'male' => 'Male', 'female' => 'Female'] as $val => $label): ?>
                 <option value="<?= $val ?>" <?= ($old['patient_sex'] ?? 'unknown') === $val ? 'selected' : '' ?>><?= $label ?></option>
               <?php endforeach; ?>
             </select>
+            <?= field_error_html($errors, 'patient_sex') ?>
           </label>
-          <label class="<?= fc($errors, 'patient_dob') ?>"><span class="lbl">Date of birth (if known)</span><input type="date" name="patient_dob" value="<?= ov($old, 'patient_dob') ?>" max="<?= date('Y-m-d') ?>"></label>
-          <label class="<?= fc($errors, 'patient_weight_kg') ?>"><span class="lbl">Weight (kg)</span><input type="number" step="0.01" min="0" name="patient_weight_kg" value="<?= ov($old, 'patient_weight_kg') ?>"></label>
+          <label class="<?= field_class($errors, 'patient_dob') ?>"><span class="lbl">Date of birth (if known)</span><input type="date" name="patient_dob" value="<?= old_value($old, 'patient_dob') ?>" max="<?= date('Y-m-d') ?>"<?= field_error_attrs($errors, 'patient_dob') ?>><?= field_error_html($errors, 'patient_dob') ?></label>
+          <label class="<?= field_class($errors, 'patient_weight_kg') ?>"><span class="lbl">Weight (kg)</span><input type="number" step="0.01" min="0" name="patient_weight_kg" value="<?= old_value($old, 'patient_weight_kg') ?>"<?= field_error_attrs($errors, 'patient_weight_kg') ?>><?= field_error_html($errors, 'patient_weight_kg') ?></label>
         </div>
         <div class="field-row two">
-          <label class="field"><span class="lbl">Microchip / patient ID (optional)</span><input type="text" name="patient_microchip" value="<?= ov($old, 'patient_microchip') ?>"></label>
+          <label class="field"><span class="lbl">Microchip / patient ID (optional)</span><input type="text" name="patient_microchip" value="<?= old_value($old, 'patient_microchip') ?>"></label>
           <div class="checkbox-field" style="margin:0; align-items:center;">
             <input type="checkbox" name="patient_neutered" id="patient_neutered" value="1" <?= !empty($old['patient_neutered']) ? 'checked' : '' ?>>
             <label for="patient_neutered">Neutered / spayed</label>
           </div>
         </div>
-        <label class="field"><span class="lbl">Clinical notes</span><textarea name="clinical_notes" rows="4"><?= ov($old, 'clinical_notes') ?></textarea></label>
+        <label class="field"><span class="lbl">Clinical notes</span><textarea name="clinical_notes" rows="4"><?= old_value($old, 'clinical_notes') ?></textarea></label>
       </fieldset>
 
       <fieldset>
         <legend>Requested formulation</legend>
-        <div class="radio-row <?= isset($errors['requested_formulation']) ? 'has-error' : '' ?>">
-          <div class="radio-field"><input type="radio" name="requested_formulation" id="f-injection" value="injection" <?= ($old['requested_formulation'] ?? '') === 'injection' ? 'checked' : '' ?>><label for="f-injection">Injection</label></div>
+        <div class="<?= field_class($errors, 'requested_formulation', 'radio-row') ?>" role="radiogroup" aria-label="Requested formulation">
+          <div class="radio-field"><input type="radio" name="requested_formulation" id="f-injection" value="injection"<?= field_error_attrs($errors, 'requested_formulation') ?> <?= ($old['requested_formulation'] ?? '') === 'injection' ? 'checked' : '' ?>><label for="f-injection">Injection</label></div>
           <div class="radio-field"><input type="radio" name="requested_formulation" id="f-oral" value="oral" <?= ($old['requested_formulation'] ?? '') === 'oral' ? 'checked' : '' ?>><label for="f-oral">Oral tablet / pill</label></div>
         </div>
+        <?= field_error_html($errors, 'requested_formulation') ?>
       </fieldset>
 
       <fieldset>
         <legend>Prescription</legend>
-        <label class="<?= fc($errors, 'prescription') ?>">
-          <span class="lbl">Prescription upload (PDF, JPG or PNG) — required</span>
-          <input type="file" name="prescription" accept=".pdf,.jpg,.jpeg,.png" required>
+        <?= reattach_files_note($errors, 'prescription', 'your prescription or any other documents') ?>
+        <label class="<?= field_class($errors, 'prescription') ?>">
+          <span class="lbl">Prescription upload (PDF, JPG or PNG, up to <?= upload_size_text(upload_limit_bytes()) ?>) - required</span>
+          <input type="file" name="prescription" accept=".pdf,.jpg,.jpeg,.png" data-max-bytes="<?= upload_limit_bytes() ?>" required<?= field_error_attrs($errors, 'prescription') ?>>
+          <?= field_error_html($errors, 'prescription') ?>
         </label>
       </fieldset>
 
       <fieldset>
         <legend>Supporting documents (optional)</legend>
-        <p class="field-hint" style="margin-bottom:1rem;">Laboratory reports, diagnostic reports, imaging, or other clinical documentation.</p>
+        <p class="field-hint" style="margin-bottom:1rem;">Laboratory reports, diagnostic reports, imaging, or other clinical documentation. Each file can be up to <?= upload_size_text(upload_limit_bytes()) ?>.</p>
         <div class="field-row two">
-          <label class="field"><span class="lbl">Document 1</span><input type="file" name="supporting_1" accept=".pdf,.jpg,.jpeg,.png"></label>
-          <label class="field"><span class="lbl">Document 2</span><input type="file" name="supporting_2" accept=".pdf,.jpg,.jpeg,.png"></label>
+          <label class="<?= field_class($errors, 'supporting_1') ?>"><span class="lbl">Document 1</span><input type="file" name="supporting_1" accept=".pdf,.jpg,.jpeg,.png" data-max-bytes="<?= upload_limit_bytes() ?>"<?= field_error_attrs($errors, 'supporting_1') ?>><?= field_error_html($errors, 'supporting_1') ?></label>
+          <label class="<?= field_class($errors, 'supporting_2') ?>"><span class="lbl">Document 2</span><input type="file" name="supporting_2" accept=".pdf,.jpg,.jpeg,.png" data-max-bytes="<?= upload_limit_bytes() ?>"<?= field_error_attrs($errors, 'supporting_2') ?>><?= field_error_html($errors, 'supporting_2') ?></label>
         </div>
       </fieldset>
 
-      <div class="checkbox-field <?= isset($errors['consent']) ? 'has-error' : '' ?>">
-        <input type="checkbox" name="consent" id="consent" value="1" <?= !empty($old['consent']) ? 'checked' : '' ?>>
-        <label for="consent">I confirm I am the treating veterinarian for this patient and am authorising this GS-441524 compounding request on that basis.</label>
+      <div class="<?= field_class($errors, 'consent', 'checkbox-field') ?>">
+        <input type="checkbox" name="consent" id="consent" value="1"<?= field_error_attrs($errors, 'consent') ?> <?= !empty($old['consent']) ? 'checked' : '' ?>>
+        <label for="consent"><?= htmlspecialchars(VET_ATTESTATION_TEXT, ENT_QUOTES) ?></label>
       </div>
+      <?= field_error_html($errors, 'consent') ?>
 
       <button type="submit" class="btn-primary">Submit Request</button>
     </form>
+    <script src="/js/upload-limit.js"></script>
+    <?= form_error_focus_script($errors) ?>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

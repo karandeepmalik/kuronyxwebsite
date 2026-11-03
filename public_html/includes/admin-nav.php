@@ -9,20 +9,24 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
 }
 
 $activeAdminNav = $activeAdminNav ?? '';
+// Links go only to pages the person can actually open: every one of the admin-only pages answers a
+// pharmacy_staff request with a 403, so showing them the link would just lead to a dead end.
 $adminNavItems = [
     'gs-requests'      => ['/admin/gs-requests/', 'GS-441524 Requests'],
     'vet-applications' => ['/admin/veterinary-applications/', 'Veterinary Applications'],
-    'dispatches'       => ['/admin/dispatches/', 'Dispatches'],
-    'audit-log'        => ['/admin/audit-log/', 'Audit Log'],
 ];
+if (($staff['role'] ?? null) === 'admin') {
+    $adminNavItems += [
+        'dispatches'   => ['/admin/dispatches/', 'Journal'],
+        'audit-log'    => ['/admin/audit-log/', 'Audit Log'],
+        'staff'        => ['/admin/staff/', 'Staff'],
+        'data-erasure' => ['/admin/data-erasure/', 'Data Erasure'],
+    ];
+}
 ?>
     <nav class="admin-nav" aria-label="Admin">
       <?php foreach ($adminNavItems as $key => [$href, $label]): ?>
         <a href="<?= htmlspecialchars($href, ENT_QUOTES) ?>"<?= $activeAdminNav === $key ? ' class="active"' : '' ?>><?= htmlspecialchars($label, ENT_QUOTES) ?></a>
       <?php endforeach; ?>
-      <?php if (($staff['role'] ?? null) === 'admin'): ?>
-        <a href="/admin/staff/"<?= $activeAdminNav === 'staff' ? ' class="active"' : '' ?>>Staff</a>
-        <a href="/admin/data-erasure/"<?= $activeAdminNav === 'data-erasure' ? ' class="active"' : '' ?>>Data Erasure</a>
-      <?php endif; ?>
       <form method="POST" action="/admin/logout.php" class="signout-form"><?= csrf_field() ?><button type="submit" class="signout">Sign Out</button></form>
     </nav>

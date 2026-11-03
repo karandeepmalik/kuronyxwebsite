@@ -1,6 +1,7 @@
 <?php
 require __DIR__ . '/../includes/db.php';
 require __DIR__ . '/../includes/auth.php';
+require_once __DIR__ . '/../includes/form-errors.php';
 
 csrf_token();
 
@@ -65,7 +66,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $account) {
     }
 }
 
-$pageTitle     = 'Activate Your Veterinary Account — Kuronyx Sciences';
+$pageTitle     = 'Activate your veterinary account | Kuronyx';
 $robotsNoindex = true;
 $activeNav     = 'for-veterinarians';
 require __DIR__ . '/../includes/layout-header.php';
@@ -74,9 +75,10 @@ require __DIR__ . '/../includes/layout-header.php';
     <h1 class="doc-title">Activate your veterinary account</h1>
 
     <?php if ($done): ?>
-        <div class="alert alert-ok">Your account is active. <a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Sign in</a> to continue.</div>
+        <div class="alert alert-ok">Your account is active. <a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Log in</a> to continue.</div>
     <?php elseif (!$account): ?>
-        <div class="alert">This activation link is invalid or has expired. Please contact <a href="mailto:ops@kuronyx.in" style="color:#ffb3b3;">ops@kuronyx.in</a> for a new one.</div>
+        <?php /* A link that was already used looks exactly like a wrong or expired one (activation clears the token), so the hint is the same for everyone and reveals nothing: vets click the emailed link a second time. */ ?>
+        <div class="alert">This activation link is invalid or has expired. Already activated? <a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Log in here</a>. Otherwise, please contact <a href="mailto:ops@kuronyx.in" style="color:#ffb3b3;">ops@kuronyx.in</a> for a new link.</div>
     <?php else: ?>
         <p class="lead">Welcome, <?= htmlspecialchars($account['full_name'], ENT_QUOTES) ?>. Set a password to activate your Kuronyx veterinary portal account (<?= htmlspecialchars($account['email'], ENT_QUOTES) ?>).</p>
 
@@ -87,15 +89,17 @@ require __DIR__ . '/../includes/layout-header.php';
         <form method="POST" novalidate>
           <?= csrf_field() ?>
           <input type="hidden" name="token" value="<?= htmlspecialchars($rawToken, ENT_QUOTES) ?>">
-          <label class="field <?= isset($errors['password']) ? 'has-error' : '' ?>">
+          <label class="<?= field_class($errors, 'password') ?>">
             <span class="lbl">Password (min. 12 characters)</span>
-            <input type="password" name="password" required minlength="12">
+            <input type="password" name="password" required minlength="12"<?= field_error_attrs($errors, 'password') ?>>
+            <?= field_error_html($errors, 'password') ?>
           </label>
-          <label class="field <?= isset($errors['password_confirm']) ? 'has-error' : '' ?>">
+          <label class="<?= field_class($errors, 'password_confirm') ?>">
             <span class="lbl">Confirm password</span>
-            <input type="password" name="password_confirm" required minlength="12">
+            <input type="password" name="password_confirm" required minlength="12"<?= field_error_attrs($errors, 'password_confirm') ?>>
+            <?= field_error_html($errors, 'password_confirm') ?>
           </label>
-          <button type="submit" class="btn-primary" style="margin-top:1rem;">Activate Account</button>
+          <button type="submit" class="btn-primary" style="margin-top:1rem;">Activate account</button>
         </form>
     <?php endif; ?>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

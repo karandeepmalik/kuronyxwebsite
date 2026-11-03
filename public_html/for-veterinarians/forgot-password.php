@@ -49,7 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'body' => "We received a request to reset the password for your Kuronyx veterinary portal account.\n\n"
                             . 'Set a new password (link valid for ' . PASSWORD_RESET_TTL_MINUTES . " minutes, single use):\n"
                             . site_url() . '/for-veterinarians/reset-password.php?token=' . $token . "\n\n"
-                            . "If you didn't request this, you can ignore this email — your password stays unchanged.",
+                            . "If you didn't request this, you can ignore this email - your password stays unchanged.",
                     ];
                 } else {
                     // Do the same kind of work the real-account branch above does (a token write
@@ -67,12 +67,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle     = 'Forgot Password — Kuronyx Sciences';
+$pageTitle     = 'Forgot your password | Kuronyx';
 $robotsNoindex = true;
 $activeNav     = 'for-veterinarians';
 require __DIR__ . '/../includes/layout-header.php';
 ?>
-    <p class="doc-eyebrow">For veterinarians · Portal sign in</p>
+    <p class="doc-eyebrow">For veterinarians · Portal log in</p>
     <h1 class="doc-title">Forgot your password?</h1>
 
     <?php if (!empty($errors['_form'])): ?>
@@ -80,8 +80,11 @@ require __DIR__ . '/../includes/layout-header.php';
     <?php endif; ?>
 
     <?php if ($sent): ?>
-      <div class="alert alert-ok">If a veterinary portal account exists for that email address, a password reset link is on its way. It expires in <?= PASSWORD_RESET_TTL_MINUTES ?> minutes and can be used once.</div>
-      <p style="margin-top:1.5rem; font-size:0.8125rem; color:var(--paper-3);"><a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Back to sign in</a></p>
+      <div class="alert alert-ok">If a veterinary portal account exists for that email address, a password reset link is on its way. It expires in <?= PASSWORD_RESET_TTL_MINUTES ?> minutes and can be used once.
+        <?php /* Only activated accounts get a reset (a pending one needs the activation link staff issue), so a vet who never activated waits for nothing. The hint is shown to everyone, whatever the address, so it reveals nothing about who has an account. */ ?>
+        <p style="margin-top:1rem;">Haven't activated your account yet? Use the link from your approval email, or write to <a href="mailto:ops@kuronyx.in" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">ops@kuronyx.in</a> for a new one.</p>
+      </div>
+      <p style="margin-top:1.5rem; font-size:0.8125rem; color:var(--paper-3);"><a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Back to log in</a></p>
     <?php else: ?>
       <p class="lead">Enter the email address of your veterinary portal account and we'll send you a link to set a new password.</p>
       <form method="POST" novalidate>
@@ -90,9 +93,9 @@ require __DIR__ . '/../includes/layout-header.php';
           <span class="lbl">Email</span>
           <input type="email" name="email" required autofocus>
         </label>
-        <button type="submit" class="btn-primary" style="margin-top:1rem;">Send Reset Link</button>
+        <button type="submit" class="btn-primary" style="margin-top:1rem;">Send reset link</button>
       </form>
-      <p style="margin-top:2rem; font-size:0.8125rem; color:var(--paper-3);"><a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Back to sign in</a></p>
+      <p style="margin-top:2rem; font-size:0.8125rem; color:var(--paper-3);"><a href="/for-veterinarians/login.php" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Back to log in</a></p>
     <?php endif; ?>
 <?php
 require __DIR__ . '/../includes/layout-footer.php';
@@ -117,6 +120,6 @@ if ($deferredEmail !== null) {
     try {
         send_transactional_email($deferredEmail['to'], $deferredEmail['name'], $deferredEmail['subject'], $deferredEmail['body']);
     } catch (MailException $e) {
-        error_log('[password-reset] vet email failed: ' . $e->getMessage());
+        error_log('[password-reset] vet email failed: ' . log_safe($e->getMessage()));
     }
 }

@@ -129,6 +129,6 @@ if ($httpCode === 201) {
     ]);
 } else {
     http_response_code(500);
-    error_log('[send-welcome] Brevo send failed (HTTP ' . $httpCode . '): ' . $response);
+    error_log('[send-welcome] Brevo send failed (HTTP ' . $httpCode . '): ' . log_safe((string) $response));
     echo json_encode(['success' => false, 'message' => 'Email could not be sent.']);
 }

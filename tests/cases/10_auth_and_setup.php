@@ -36,6 +36,8 @@ return function (TestEnv $env): void {
         ]);
         assert_equal(200, $post['status']);
         assert_contains('has-error', $post['body']);
+        assert_field_error($post['body'], 'name', 'Must be 150 characters or fewer', 'setup.php');
+        assert_no_field_error($post['body'], 'email', 'setup.php');
         assert_equal(0, (int) $env->pdo()->query('SELECT COUNT(*) FROM staff_users')->fetchColumn(), 'no account should have been created');
         assert_equal(0, (int) $env->pdo()->query('SELECT COUNT(*) FROM setup_lock')->fetchColumn(), 'setup_lock must not have been claimed by a failed attempt');
 
@@ -43,6 +45,23 @@ return function (TestEnv $env): void {
         // setup_lock claimed with no admin to show for it.
         $recheck = http_request('GET', $env->baseUrl . '/admin/setup.php?token=test-setup-token', ['cookie_jar' => $jar]);
         assert_contains('Create the first admin account', $recheck['body'], 'setup must still be usable after a failed attempt');
+    });
+
+    run_test('setup.php says what is wrong with each field (it used to set the messages and print none)', function () use ($env) {
+        $jar = $env->tmpDir . '/cookies-setup-messages.txt';
+        $get = http_request('GET', $env->baseUrl . '/admin/setup.php?token=test-setup-token', ['cookie_jar' => $jar]);
+        $post = http_request('POST', $env->baseUrl . '/admin/setup.php?token=test-setup-token', ['cookie_jar' => $jar, 'body' => [
+            'csrf_token' => extract_csrf($get['body']), 'token' => 'test-setup-token',
+            'name' => '', 'email' => 'not-an-email', 'password' => 'short', 'password_confirm' => 'different',
+        ]]);
+        assert_equal(200, $post['status']);
+        assert_field_error($post['body'], 'name', 'Required', 'setup.php');
+        assert_field_error($post['body'], 'email', 'Enter a valid email address', 'setup.php');
+        assert_field_error($post['body'], 'password', 'Use at least 12 characters', 'setup.php');
+        assert_field_error($post['body'], 'password_confirm', 'Passwords do not match', 'setup.php');
+        // What was typed comes back (except passwords); nothing was created and the page is not locked.
+        assert_contains('value="not-an-email"', $post['body']);
+        assert_equal(0, (int) $env->pdo()->query('SELECT COUNT(*) FROM setup_lock')->fetchColumn(), 'a failed attempt must not claim setup_lock');
     });
 
     run_test('setup.php creates the first admin account', function () use ($env) {

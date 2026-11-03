@@ -10,7 +10,7 @@ if (!$kind) {
     exit;
 }
 
-$pageTitle       = 'Request Received — Kuronyx Sciences';
+$pageTitle       = 'Request received | Kuronyx';
 $pageDescription = 'Your request has been received and will be reviewed by the Kuronyx team.';
 $robotsNoindex   = true;
 require __DIR__ . '/../includes/layout-header.php';

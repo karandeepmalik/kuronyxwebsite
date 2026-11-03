@@ -12,15 +12,15 @@ return function (TestEnv $env): void {
         assert_equal(403, $r['status']);
     });
 
-    run_test('an admin can create a new staff account', function () use ($env) {
+    run_test('an admin can create a new staff account (no password typed: they are emailed an invitation)', function () use ($env) {
         $jar = $env->cookieJarStaff;
         $get = http_request('GET', $env->baseUrl . '/admin/staff/new.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
         $post = http_request('POST', $env->baseUrl . '/admin/staff/new.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf, 'name' => 'New Hire', 'email' => 'new.hire@example.test',
-                'role' => 'pharmacy_staff', 'password' => 'a-fresh-strong-password', 'password_confirm' => 'a-fresh-strong-password',
+                'csrf_token' => $csrf, 'ott' => extract_ott($get['body']), 'name' => 'New Hire', 'email' => 'new.hire@example.test',
+                'role' => 'pharmacy_staff',
             ],
         ]);
         assert_equal(302, $post['status']);
@@ -31,47 +31,47 @@ return function (TestEnv $env): void {
         assert_contains('new.hire@example.test', $list['body']);
     });
 
-    run_test('creating a staff account rejects a duplicate email and a short password', function () use ($env) {
+    run_test('creating a staff account rejects a missing name and a malformed email', function () use ($env) {
         $jar = $env->cookieJarStaff;
         $get = http_request('GET', $env->baseUrl . '/admin/staff/new.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
         $post = http_request('POST', $env->baseUrl . '/admin/staff/new.php', [
             'cookie_jar' => $jar,
-            'body' => [
-                'csrf_token' => $csrf, 'name' => 'Dupe', 'email' => 'new.hire@example.test',
-                'role' => 'pharmacy_staff', 'password' => 'short', 'password_confirm' => 'short',
-            ],
+            'body' => ['csrf_token' => $csrf, 'ott' => extract_ott($get['body']), 'name' => '', 'email' => 'not-an-email', 'role' => 'pharmacy_staff'],
         ]);
         assert_equal(200, $post['status']);
         assert_contains('has-error', $post['body']);
+        assert_field_error($post['body'], 'name', 'Required', 'staff/new.php');
+        assert_field_error($post['body'], 'email', 'Enter a valid email address', 'staff/new.php');
     });
 
     run_test('creating a staff account with an email that already exists is rejected cleanly, not with a raw error', function () use ($env) {
         // Regression test for the staff/new.php duplicate-email race: the code used to
         // check for an existing row, then insert, as two separate statements — now it
         // inserts directly and catches the UNIQUE violation. This proves that catch path
-        // actually works (a valid-otherwise submission, so the earlier short-password
-        // check in "rejects a duplicate email and a short password" above never reached
-        // the DB at all and didn't exercise this).
+        // actually works (a valid-otherwise submission, so the field-validation test above
+        // never reached the DB at all and didn't exercise this). It also proves the failed
+        // INSERT sends no invitation: the rolled-back account must not be emailed a link.
+        $emailsBefore = is_file($env->dryRunEmailsPath) ? substr_count(file_get_contents($env->dryRunEmailsPath), '"to":"new.hire@example.test"') : 0;
         $jar = $env->cookieJarStaff;
         $get = http_request('GET', $env->baseUrl . '/admin/staff/new.php', ['cookie_jar' => $jar]);
         $csrf = extract_csrf($get['body']);
         $post = http_request('POST', $env->baseUrl . '/admin/staff/new.php', [
             'cookie_jar' => $jar,
             'body' => [
-                'csrf_token' => $csrf, 'name' => 'Dupe With Valid Password', 'email' => 'new.hire@example.test',
-                'role' => 'pharmacy_staff', 'password' => 'a-perfectly-fine-password', 'password_confirm' => 'a-perfectly-fine-password',
+                'csrf_token' => $csrf, 'ott' => extract_ott($get['body']), 'name' => 'Dupe With Valid Fields', 'email' => 'new.hire@example.test',
+                'role' => 'pharmacy_staff',
             ],
         ]);
         assert_equal(200, $post['status']);
-        // This page only ever renders a has-error class on the field, never per-field
-        // error text (see the existing "rejects a duplicate email and a short password"
-        // test above, which checks the same thing) — so this confirms the submission was
-        // rejected, not silently accepted as a second account.
-        assert_contains('has-error', $post['body']);
+        // The duplicate is only discovered by the INSERT's UNIQUE violation, and the admin must be TOLD so:
+        // this message was set in new.php but never printed until the page started rendering field messages.
+        assert_field_error($post['body'], 'email', 'An account with this email already exists', 'staff/new.php');
 
         $count = (int) $env->scalar("SELECT COUNT(*) FROM staff_users WHERE email = 'new.hire@example.test'");
         assert_equal(1, $count, 'the duplicate attempt must not have created a second row');
+        $emailsAfter = is_file($env->dryRunEmailsPath) ? substr_count(file_get_contents($env->dryRunEmailsPath), '"to":"new.hire@example.test"') : 0;
+        assert_equal($emailsBefore, $emailsAfter, 'a rejected duplicate must not send another invitation');
     });
 
     run_test('toggling a staff account active twice in a row ends up back where it started', function () use ($env) {
@@ -221,6 +221,16 @@ return function (TestEnv $env): void {
         $newHireId = (int) $env->scalar("SELECT id FROM staff_users WHERE email = 'new.hire@example.test'");
         // Reactivate and sign in with a fresh session.
         $env->pdo()->prepare('UPDATE staff_users SET active = 1 WHERE id = ?')->execute([$newHireId]);
+
+        // The admin no longer picks the new hire's password: they set it themselves from the invitation link.
+        $invitation = $env->lastDryRunEmailTo('new.hire@example.test');
+        assert_true($invitation !== null && preg_match('#/admin/reset-password\.php\?token=([a-f0-9]+)#', $invitation['body'], $m), 'the invitation email');
+        $setJar = $env->tmpDir . '/cookies-midsession-setpw.txt';
+        $setGet = http_request('GET', $env->baseUrl . '/admin/reset-password.php?token=' . $m[1], ['cookie_jar' => $setJar]);
+        $setPost = http_request('POST', $env->baseUrl . '/admin/reset-password.php', ['cookie_jar' => $setJar, 'body' => [
+            'csrf_token' => extract_csrf($setGet['body']), 'token' => $m[1], 'password' => 'a-fresh-strong-password', 'password_confirm' => 'a-fresh-strong-password',
+        ]]);
+        assert_contains('Your password has been changed', $setPost['body']);
 
         $jar = $env->tmpDir . '/cookies-midsession-deactivate.txt';
         $get = http_request('GET', $env->baseUrl . '/admin/login.php', ['cookie_jar' => $jar]);

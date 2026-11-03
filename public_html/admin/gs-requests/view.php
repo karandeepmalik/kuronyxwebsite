@@ -15,7 +15,8 @@ if (!$case) {
     exit('Case not found.');
 }
 
-$statuses = ['submitted','under_review','awaiting_information','communication_in_progress','formulation_discussion','approved','compounding','ready_for_dispatch','dispatched','finished','closed','cancelled','rejected'];
+require_once __DIR__ . '/../../includes/case-statuses.php';
+$statuses = GS_CASE_STATUSES; // the single shared list - see includes/case-statuses.php
 $flash = null;
 // What staff typed into the email composer, kept when a send fails validation (or fails to
 // go out) so the form re-renders with their draft instead of wiping it back to the blank template.
@@ -24,13 +25,53 @@ $draft = null;
 // 4 bytes/char). Over it MySQL throws and the visitor sees a bare 500.
 const NOTE_MAX_CHARS = 10000;
 
+// Post/Redirect/Get: a SUCCESSFUL action (status, case details, assignment, note, email sent, "no email needed")
+// ends with a redirect to a plain GET of this page, and its message travels in the session. Without it the
+// browser stayed on the POST, so F5 or a double-click re-sent it: "Add note" had no lock version and no
+// one-time token, so it saved the note twice, and a refresh after a status change re-sent a stale lock
+// version and showed a confusing "changed by someone else". The message is removed from the session the
+// moment it is read, so it shows once and a reload does not show it again.
+if (isset($_SESSION['case_flash'][$id])) {
+    $flash = $_SESSION['case_flash'][$id];
+    unset($_SESSION['case_flash'][$id]);
+}
+
+// What was typed into each form, kept when its submit FAILS (validation, a lock conflict, an expired session) so
+// the form re-renders with it instead of with the freshly re-fetched row - without this, anything typed and not
+// saved was wiped on every error (a long note over the limit came back as "too long" plus an empty box). Keyed by
+// action; only set for the form that failed, so a successful save still shows the saved values.
+$keepFields = [
+    'update_final' => ['final_formulation', 'final_concentration', 'final_quantity', 'final_price', 'courier', 'tracking_number', 'dispatch_date', 'closure_reason'],
+    'change_status' => ['new_status', 'status_note'],
+    'assign_staff' => ['assigned_staff_id'],
+    'add_note' => ['content'],
+];
+$typed = [];
+// A form's value: what was typed if that form just failed, else what is saved.
+// (By reference: $typed is filled in after this closure is created, and an arrow function would copy it empty.)
+$tv = function (string $action, string $field, $saved) use (&$typed) {
+    return isset($typed[$action]) ? $typed[$action][$field] : ($saved ?? '');
+};
+
+// Returned when the row changed since the form was loaded (another staff member saved, or a status change
+// landed). 'conflict' marks it so the details of WHAT changed are added once the row has been re-read below.
+$conflictFlash = ['type' => 'err', 'conflict' => true, 'text' => 'This case was changed by someone else since you loaded this page. What you typed is kept below: check it against what is saved now, then save again to overwrite it, or reload the page to discard it.'];
+
+// Erasure (data-protection.php) blanks the personal data and the case is then kept only as a record. So it is
+// READ-ONLY: every form is hidden below and every POST is refused here on the server, otherwise staff could
+// type personal details straight back into an erased case (an internal note, the status note, the closure
+// reason or tracking number that erasure had just blanked), or email an address that no longer exists.
+$isErased = !empty($case['erased_at']);
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
         $flash = ['type' => 'err', 'text' => 'Your session expired. Please try again.'];
     } else {
         $action = $_POST['action'] ?? '';
 
-        if ($action === 'change_status') {
+        if ($isErased) {
+            $flash = ['type' => 'err', 'text' => 'This case has been erased, so it is read-only: nothing can be added, changed or sent. Its status history is kept.'];
+        } elseif ($action === 'change_status') {
             $newStatus = $_POST['new_status'] ?? '';
             $note      = trim($_POST['status_note'] ?? '');
             $expectedLockVersion = (int) ($_POST['expected_lock_version'] ?? -1);
@@ -39,7 +80,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } elseif (mb_strlen($note) > NOTE_MAX_CHARS) {
                 $flash = ['type' => 'err', 'text' => 'The status note is too long (max ' . NOTE_MAX_CHARS . ' characters).'];
             } else {
-                $flash = run_serialized_transaction($pdo, function (PDO $pdo) use ($id, $newStatus, $note, $staff, $expectedLockVersion, &$case) {
+                $flash = run_serialized_transaction($pdo, function (PDO $pdo) use ($id, $newStatus, $note, $staff, $expectedLockVersion, &$case, $conflictFlash) {
                     // Re-reads status (for the history row's previous_status) and
                     // lock_version from inside the transaction, not the $case snapshot
                     // taken at the top of the script — two concurrent status changes on the
@@ -57,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         return ['type' => 'err', 'text' => 'Case not found.'];
                     }
                     if ((int) $current['lock_version'] !== $expectedLockVersion) {
-                        return ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
+                        return $conflictFlash;
                     }
 
                     $pdo->prepare('UPDATE gs_requests SET status = ?, lock_version = lock_version + 1 WHERE id = ?')->execute([$newStatus, $id]);
@@ -70,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // an opaque 500 for a change that had actually succeeded.
                     audit('case_status_changed', 'gs_request', $id, ['from' => $current['status'], 'to' => $newStatus]);
                     $case['status'] = $newStatus;
-                    return ['type' => 'ok', 'text' => 'Status updated. Nothing is emailed automatically — use "Send an email" below if the owner needs to be told.'];
+                    return ['type' => 'ok', 'text' => 'Status updated. Nothing is emailed automatically - use "Send an email" below if the owner needs to be told.'];
                 });
             }
         } elseif ($action === 'add_note') {
@@ -99,7 +140,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Validated before touching the DB — previously a non-numeric price silently became
             // 0, a negative or absurdly large one reached a DECIMAL(10,2) column (a 500, or
             // INF for 1e999), and an invalid dispatch_date or over-long text field threw from
-            // the UPDATE itself, losing everything else typed into this form.
+            // the UPDATE itself, losing everything else typed into this form. A validation error
+            // is just a message now; the typed values are kept and re-shown (see $typed below).
             $finalError = null;
             $rawPrice = trim($_POST['final_price'] ?? '');
             if ($rawPrice !== '') {
@@ -144,38 +186,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
             $stmt->execute([...array_values($final), $id, (int) ($_POST['expected_lock_version'] ?? -1)]);
             if ($stmt->rowCount() === 0) {
-                $flash = ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
+                $flash = $conflictFlash;
             } else {
                 audit('formulation_recorded', 'gs_request', $id, ['fields' => array_keys(array_filter($final, fn($v) => $v !== null))]);
                 $flash = ['type' => 'ok', 'text' => 'Case details updated.'];
             }
             }
         } elseif ($action === 'assign_staff') {
-            $assignedId = (int) ($_POST['assigned_staff_id'] ?? 0) ?: null;
-            // An id that doesn't exist used to hit the foreign key and surface as a 500, and
-            // a deactivated account (which can no longer sign in to do anything with the case)
-            // could still be picked — only an existing, active staff member is a valid target.
-            $validAssignee = true;
+            $assignedId   = (int) ($_POST['assigned_staff_id'] ?? 0) ?: null;
+            $currentId    = (int) ($case['assigned_staff_id'] ?? 0) ?: null;
+            $expectedLock = (int) ($_POST['expected_lock_version'] ?? -1);
+            // Who the form names, and whether they can be assigned: an id that doesn't exist used to hit the
+            // foreign key and surface as a 500, and a deactivated account (which can no longer sign in to do
+            // anything with the case) must not be picked - only an existing, active staff member is a valid target.
+            $target = null;
             if ($assignedId !== null) {
-                $chk = $pdo->prepare('SELECT 1 FROM staff_users WHERE id = ? AND active = 1');
-                $chk->execute([$assignedId]);
-                $validAssignee = (bool) $chk->fetchColumn();
+                $lookup = $pdo->prepare('SELECT name, active FROM staff_users WHERE id = ?');
+                $lookup->execute([$assignedId]);
+                $target = $lookup->fetch() ?: null;
             }
-            if (!$validAssignee) {
+            $targetUsable = $assignedId === null || ($target !== null && (int) $target['active'] === 1);
+
+            if ($assignedId === $currentId && $expectedLock === (int) $case['lock_version']) {
+                // Saved without changing anything (and nobody else touched the case since the page loaded), so
+                // there is nothing to write: no version bump, no audit entry. It must not be refused just
+                // because the current assignee has since been deactivated - but then say so, because that
+                // person can't work the case any more and someone else should take it.
+                $flash = $targetUsable
+                    ? ['type' => 'ok', 'text' => 'Assignment unchanged.']
+                    : ['type' => 'err', 'text' => 'Assignment unchanged. ' . ($target['name'] ?? 'The current assignee') . ' is deactivated, so choose someone else to take this case.'];
+            } elseif (!$targetUsable) {
                 $flash = ['type' => 'err', 'text' => 'Choose an active staff member.'];
-                $stmt = null;
             } else {
-            // Same optimistic-lock pattern as update_final above.
-            $stmt = $pdo->prepare('UPDATE gs_requests SET assigned_staff_id = ?, lock_version = lock_version + 1 WHERE id = ? AND lock_version = ?');
-            $stmt->execute([$assignedId, $id, (int) ($_POST['expected_lock_version'] ?? -1)]);
-            }
-            if ($stmt === null) {
-                // flash already set above
-            } elseif ($stmt->rowCount() === 0) {
-                $flash = ['type' => 'err', 'text' => 'This case was changed by someone else since you loaded this page. Please reload and try again.'];
-            } else {
-                audit('case_assigned', 'gs_request', $id, ['assigned_staff_id' => $assignedId]);
-                $flash = ['type' => 'ok', 'text' => 'Assignment updated.'];
+                // Same optimistic-lock pattern as update_final above.
+                $stmt = $pdo->prepare('UPDATE gs_requests SET assigned_staff_id = ?, lock_version = lock_version + 1 WHERE id = ? AND lock_version = ?');
+                $stmt->execute([$assignedId, $id, $expectedLock]);
+                if ($stmt->rowCount() === 0) {
+                    $flash = $conflictFlash;
+                } else {
+                    audit('case_assigned', 'gs_request', $id, ['assigned_staff_id' => $assignedId]);
+                    $flash = ['type' => 'ok', 'text' => 'Assignment updated.'];
+                }
             }
         } elseif ($action === 'send_email') {
             $senderEmail = trim($_POST['sender'] ?? '');
@@ -188,16 +239,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // restriction again server-side regardless of what this form allows.
             $allowedRecipients = array_filter([$case['owner_email'], $case['vet_email']]);
             $draft = ['sender' => $senderEmail, 'recipient' => $recipient, 'subject' => $subject, 'body' => $body];
-            if ($case['erased_at'] ?? null) {
-                $draft = null;
-                $flash = ['type' => 'err', 'text' => 'The personal data for this case has been erased — there is no address to email.'];
-            } elseif (!consume_one_time_token('send_email:' . $id)) {
+            if (!consume_one_time_token('send_email:' . $id)) {
                 // Not kept as a draft: this is most likely a resubmission of a send that already went out.
                 $draft = null;
                 // A double-click or an F5 resubmitting the same POST has exactly this
                 // shape — the token from that original form render was already consumed
                 // by whichever submission got here first, so a second one can't also send.
-                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) — reload and try again if you still need to send it.'];
+                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) - reload and try again if you still need to send it.'];
             } elseif (!array_key_exists($senderEmail, verified_senders())) {
                 $flash = ['type' => 'err', 'text' => 'Select a valid sender address.'];
             } elseif (!in_array($recipient, $allowedRecipients, true)) {
@@ -206,40 +254,103 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $flash = ['type' => 'err', 'text' => 'Subject and message body are required.'];
             } elseif (($ph = unresolved_placeholder($subject . "
 " . $body)) !== null) {
-                $flash = ['type' => 'err', 'text' => "This message still contains an unfilled placeholder: {$ph} — replace it before sending."];
+                $flash = ['type' => 'err', 'text' => "This message still contains an unfilled placeholder: {$ph} - replace it before sending."];
             } elseif (mb_strlen($subject) > 255) {
                 $flash = ['type' => 'err', 'text' => 'Subject must be 255 characters or fewer.'];
             } elseif (mb_strlen($body) > 60000 || strlen($body) > TEXT_MAX_BYTES) { // case_emails.body is TEXT (bytes)
                 $flash = ['type' => 'err', 'text' => 'Message body is too long.'];
             } else {
                 $recipientName = $recipient === $case['owner_email'] ? $case['owner_full_name'] : ($recipient === $case['vet_email'] ? ($case['vet_name'] ?? '') : '');
-                $sent = send_case_email($pdo, $id, $staff['id'], $recipient, $recipientName, $subject, $body, $senderEmail);
-                if ($sent) $draft = null; // a failed send keeps the draft so it can be retried
-                audit($sent ? 'email_sent' : 'email_failed', 'gs_request', $id, ['recipient' => $recipient, 'sender' => $senderEmail]);
-                $flash = $sent
+                $result = send_case_email($pdo, $id, $staff['id'], $recipient, $recipientName, $subject, $body, $senderEmail);
+                if ($result === 'sent') $draft = null; // a failed or unconfirmed send keeps the draft so it can be retried, once it is known to be safe
+                audit(['sent' => 'email_sent', 'unknown' => 'email_unconfirmed'][$result] ?? 'email_failed', 'gs_request', $id, ['recipient' => $recipient, 'sender' => $senderEmail]);
+                // 'unknown' = no answer came back, so the email MAY have gone out: say so, never "failed" (staff would click Send again)
+                $flash = $result === 'sent'
                     ? ['type' => 'ok', 'text' => 'Email sent.']
-                    : ['type' => 'err', 'text' => 'Email failed to send. The attempt has been logged below.'];
+                    : ($result === 'unknown'
+                        ? ['type' => 'err', 'text' => mail_unconfirmed_text($recipient) . ' The attempt has been logged below.']
+                        : ['type' => 'err', 'text' => 'Email failed to send. The attempt has been logged below.']);
             }
         } elseif ($action === 'no_email_needed') {
             // Same one-time token as send_email (both buttons live in one form), so a double-click
             // can't write two audit entries.
             if (!consume_one_time_token('send_email:' . $id)) {
-                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) — reload if you still need to.'];
+                $flash = ['type' => 'err', 'text' => 'This form was already submitted (or the page is stale) - reload if you still need to.'];
             } else {
                 audit('email_not_needed', 'gs_request', $id, ['status' => $case['status']]);
-                $flash = ['type' => 'ok', 'text' => 'Noted — no email needed for this update.'];
+                $flash = ['type' => 'ok', 'text' => 'Noted - no email needed for this update.'];
             }
         }
     }
 
+    // Only a success is redirected. An error or refusal (empty or over-long note, a lock conflict, a stale
+    // page, a failed send, an expired session) is shown on this response, because the page must keep what
+    // was typed and the email draft; repeating a refused request just refuses it again.
+    if ($flash && $flash['type'] === 'ok' && session_status() === PHP_SESSION_ACTIVE) {
+        $_SESSION['case_flash'][$id] = $flash;
+        header('Location: /admin/gs-requests/view.php?id=' . $id);
+        exit;
+    }
+
+    // A form that failed (validation, a lock conflict, an expired session) keeps what was typed: the forms
+    // below fill from $typed instead of the saved row. Without this the re-fetch below wiped it all.
+    $keptAction = $_POST['action'] ?? '';
+    if ($flash && $flash['type'] === 'err' && !$isErased && isset($keepFields[$keptAction])) {
+        foreach ($keepFields[$keptAction] as $field) {
+            $typed[$keptAction][$field] = (string) ($_POST[$field] ?? '');
+        }
+    }
+
     // Re-fetch rather than patching individual fields in-memory above — any of the
-    // actions above (including change_status, which also touches this row) can have
-    // changed updated_at, and the forms below embed it as the optimistic-lock token for
-    // update_final/assign_staff's next submission. A stale in-memory value here would
-    // make the very next legitimate edit fail with a false "someone else changed this".
+    // actions above (including change_status, which also touches this row) bumps
+    // lock_version, and the forms below embed it as the optimistic-lock token for
+    // the next submission. A stale in-memory value here would make the very next
+    // legitimate edit fail with a false "someone else changed this".
     $stmt = $pdo->prepare('SELECT * FROM gs_requests WHERE id = ? LIMIT 1');
     $stmt->execute([$id]);
     $case = $stmt->fetch() ?: $case;
+
+    // A lock conflict keeps the typed values AND hands the form the NEW lock_version (above), so saving again
+    // would overwrite what the other person saved. Say exactly what that would do, so overwriting is a choice
+    // made with the facts. For the case-details form, every field where what was typed differs from what is saved
+    // now, in two short lists: fields that hold saved data (saving REPLACES it - this includes fields the other
+    // person changed that this person never touched) and fields that are empty now (saving only ADDS to them).
+    // Printed as lists under the sentence ($flash['lists']), not run into it: with eight fields it was a wall.
+    if ($flash && !empty($flash['conflict']) && isset($typed[$keptAction])) {
+        $shown = fn (string $v): string => '“' . mb_strimwidth($v, 0, 60, '…') . '”';
+        if ($keptAction === 'update_final') {
+            $labels = [
+                'final_formulation' => 'Final formulation', 'final_concentration' => 'Concentration', 'final_quantity' => 'Quantity',
+                'final_price' => 'Price', 'courier' => 'Courier', 'tracking_number' => 'Tracking number',
+                'dispatch_date' => 'Dispatch date', 'closure_reason' => 'Closure reason',
+            ];
+            $replace = [];
+            $add = [];
+            foreach ($labels as $field => $label) {
+                $mine  = trim($typed['update_final'][$field]);
+                $saved = trim((string) ($case[$field] ?? ''));
+                // 1200 and 1200.00 are the same price.
+                $same = ($field === 'final_price' && is_numeric($mine) && is_numeric($saved)) ? abs((float) $mine - (float) $saved) < 0.005 : $mine === $saved;
+                if ($same) continue;
+                if ($saved === '') {
+                    $add[] = "{$label}: {$shown($mine)}";
+                } else {
+                    $replace[] = $mine === '' ? "{$label}: {$shown($saved)} would be cleared" : "{$label}: {$shown($saved)} would become {$shown($mine)}";
+                }
+            }
+            if ($replace) $flash['lists'][] = ['heading' => 'Saving again would replace what is saved now:', 'items' => $replace];
+            if ($add)     $flash['lists'][] = ['heading' => $replace ? 'and would fill in these empty fields:' : 'Saving again would fill in these empty fields:', 'items' => $add];
+            if (!$replace && !$add) {
+                $flash['text'] .= ' Nothing you typed differs from what is saved now, so saving again will not overwrite anything.';
+            }
+        } elseif ($keptAction === 'change_status') {
+            $flash['text'] .= ' The status is now "' . status_label($case['status']) . '".';
+        } elseif ($keptAction === 'assign_staff') {
+            $who = $pdo->prepare('SELECT name FROM staff_users WHERE id = ?');
+            $who->execute([(int) ($case['assigned_staff_id'] ?? 0)]);
+            $flash['text'] .= ' The case is now ' . (($name = $who->fetchColumn()) !== false && $case['assigned_staff_id'] ? 'assigned to ' . $name : 'unassigned') . '.';
+        }
+    }
 }
 
 $documents = $pdo->prepare('SELECT * FROM gs_request_documents WHERE gs_request_id = ? ORDER BY created_at ASC');
@@ -258,7 +369,7 @@ $emails = $pdo->prepare('SELECT e.*, s.name AS staff_name FROM case_emails e LEF
 $emails->execute([$id]);
 $emails = $emails->fetchAll();
 
-$allStaff = $pdo->prepare('SELECT id, name FROM staff_users WHERE active = 1 OR id = ? ORDER BY name ASC');
+$allStaff = $pdo->prepare('SELECT id, name, active FROM staff_users WHERE active = 1 OR id = ? ORDER BY name ASC');
 $allStaff->execute([(int) ($case['assigned_staff_id'] ?? 0)]);
 $allStaff = $allStaff->fetchAll();
 
@@ -281,13 +392,13 @@ $trackingLine  = 'Courier: ' . ($case['courier'] ?: '[courier name]') . "\nTrack
 
 $emailTemplates = [
     'blank' => [
-        'label'   => '— Blank / custom —',
+        'label'   => '- Blank / custom -',
         'subject' => "Update on your GS-441524 request (GS-{$id})",
         'body'    => '',
     ],
     'awaiting_information' => [
         'label'   => 'Awaiting Information',
-        'subject' => "Additional information needed — GS-{$id}",
+        'subject' => "Additional information needed - GS-{$id}",
         'body'    => "We need some additional information before we can proceed with your request. Our team will be in touch with specifics.\n\n{$ref}",
     ],
     'approved' => [
@@ -322,7 +433,7 @@ $emailTemplates = [
     ],
 ];
 
-$pageTitle     = "GS-{$id} — Kuronyx Admin";
+$pageTitle     = "GS-{$id} - Kuronyx Admin";
 $robotsNoindex = true;
 $backHref      = '/admin/gs-requests/';
 $backLabel     = 'All requests';
@@ -331,17 +442,25 @@ require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · GS-441524 case</p>
     <h1 class="doc-title">GS-<?= $id ?></h1>
-    <?php if (!empty($case['erased_at'])): ?>
-      <div class="alert">Personal data for this case was erased on <?= htmlspecialchars(fmt_time($case['erased_at']), ENT_QUOTES) ?>. Names, contact details, documents, emails and notes are gone; only the case record and its status history remain.</div>
+    <?php if ($isErased): ?>
+      <div class="alert">Personal data for this case was erased on <?= htmlspecialchars(fmt_time($case['erased_at']), ENT_QUOTES) ?>. Names, contact details, documents, emails and notes are gone; only the case record and its status history remain. The case is read-only.</div>
     <?php endif; ?>
     <p class="doc-meta">
       <?= $case['source'] === 'cat_owner' ? 'Cat owner submission' : 'Veterinarian submission' ?><span class="sep">·</span>
-      <span class="status-pill status-<?= htmlspecialchars($case['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $case['status'])) ?></span><span class="sep">·</span>
+      <span class="status-pill status-<?= htmlspecialchars($case['status'], ENT_QUOTES) ?>"><?= htmlspecialchars(status_label($case['status']), ENT_QUOTES) ?></span><span class="sep">·</span>
       Created <?= htmlspecialchars(fmt_time($case['created_at']), ENT_QUOTES) ?>
     </p>
 
     <?php if ($flash): ?>
-      <div class="alert <?= $flash['type'] === 'ok' ? 'alert-ok' : '' ?>"><?= htmlspecialchars($flash['text'], ENT_QUOTES) ?></div>
+      <div class="alert <?= $flash['type'] === 'ok' ? 'alert-ok' : '' ?>">
+        <?= htmlspecialchars($flash['text'], ENT_QUOTES) ?>
+        <?php foreach ($flash['lists'] ?? [] as $list): ?>
+          <p class="alert-list-heading"><?= htmlspecialchars($list['heading'], ENT_QUOTES) ?></p>
+          <ul class="alert-list">
+            <?php foreach ($list['items'] as $item): ?><li><?= htmlspecialchars($item, ENT_QUOTES) ?></li><?php endforeach; ?>
+          </ul>
+        <?php endforeach; ?>
+      </div>
     <?php endif; ?>
 
     <div class="card-panel">
@@ -357,11 +476,11 @@ require __DIR__ . '/../../includes/layout-header.php';
     <div class="card-panel">
       <h2>Treating veterinarian</h2>
       <div class="kv-grid">
-        <div class="k">Name</div><div class="v"><?= htmlspecialchars($case['vet_name'] ?? '—', ENT_QUOTES) ?></div>
-        <div class="k">Clinic</div><div class="v"><?= htmlspecialchars($case['vet_clinic'] ?? '—', ENT_QUOTES) ?></div>
-        <div class="k">Email</div><div class="v"><?= htmlspecialchars($case['vet_email'] ?? '—', ENT_QUOTES) ?></div>
-        <div class="k">Phone</div><div class="v"><?= htmlspecialchars($case['vet_phone'] ?? '—', ENT_QUOTES) ?></div>
-        <div class="k">Registration</div><div class="v"><?= htmlspecialchars($case['vet_registration_info'] ?? '—', ENT_QUOTES) ?></div>
+        <div class="k">Name</div><div class="v"><?= htmlspecialchars($case['vet_name'] ?? '-', ENT_QUOTES) ?></div>
+        <div class="k">Clinic</div><div class="v"><?= htmlspecialchars($case['vet_clinic'] ?? '-', ENT_QUOTES) ?></div>
+        <div class="k">Email</div><div class="v"><?= htmlspecialchars($case['vet_email'] ?? '-', ENT_QUOTES) ?></div>
+        <div class="k">Phone</div><div class="v"><?= htmlspecialchars($case['vet_phone'] ?? '-', ENT_QUOTES) ?></div>
+        <div class="k">Registration</div><div class="v"><?= htmlspecialchars($case['vet_registration_info'] ?? '-', ENT_QUOTES) ?></div>
       </div>
     </div>
 
@@ -369,12 +488,12 @@ require __DIR__ . '/../../includes/layout-header.php';
       <h2>Patient</h2>
       <div class="kv-grid">
         <div class="k">Name</div><div class="v"><?= htmlspecialchars($case['patient_name'], ENT_QUOTES) ?></div>
-        <div class="k">Species / breed</div><div class="v"><?= htmlspecialchars($case['patient_species'], ENT_QUOTES) ?> · <?= htmlspecialchars($case['patient_breed'] ?? '—', ENT_QUOTES) ?></div>
+        <div class="k">Species / breed</div><div class="v"><?= htmlspecialchars($case['patient_species'], ENT_QUOTES) ?> · <?= htmlspecialchars($case['patient_breed'] ?? '-', ENT_QUOTES) ?></div>
         <div class="k">Sex</div><div class="v"><?= htmlspecialchars(ucfirst($case['patient_sex']), ENT_QUOTES) ?></div>
         <div class="k">DOB</div><div class="v"><?= htmlspecialchars($case['patient_dob'] ?? 'Unknown', ENT_QUOTES) ?></div>
-        <div class="k">Weight</div><div class="v"><?= $case['patient_weight_kg'] !== null ? htmlspecialchars($case['patient_weight_kg'], ENT_QUOTES) . ' kg' : '—' ?></div>
-        <div class="k">Neutered / spayed</div><div class="v"><?= $case['patient_neutered'] ? 'Yes' : 'No' ?></div>
-        <div class="k">Microchip</div><div class="v"><?= htmlspecialchars($case['patient_microchip'] ?? '—', ENT_QUOTES) ?></div>
+        <div class="k">Weight</div><div class="v"><?= $case['patient_weight_kg'] !== null ? htmlspecialchars($case['patient_weight_kg'], ENT_QUOTES) . ' kg' : '-' ?></div>
+        <div class="k">Neutered / spayed</div><div class="v"><?= $case['patient_neutered'] === null ? '-' : ($case['patient_neutered'] ? 'Yes' : 'No') ?></div>
+        <div class="k">Microchip</div><div class="v"><?= htmlspecialchars($case['patient_microchip'] ?? '-', ENT_QUOTES) ?></div>
         <div class="k">Requested formulation</div><div class="v"><?= ucfirst($case['requested_formulation']) ?></div>
       </div>
       <?php if ($case['clinical_notes']): ?>
@@ -398,29 +517,43 @@ require __DIR__ . '/../../includes/layout-header.php';
 
     <div class="card-panel">
       <h2>Final formulation &amp; fulfilment (staff-only)</h2>
+      <?php if ($isErased): ?>
+        <div class="kv-grid">
+          <div class="k">Final formulation</div><div class="v"><?= htmlspecialchars($case['final_formulation'] ?? '-', ENT_QUOTES) ?></div>
+          <div class="k">Concentration / strength</div><div class="v"><?= htmlspecialchars($case['final_concentration'] ?? '-', ENT_QUOTES) ?></div>
+          <div class="k">Quantity</div><div class="v"><?= htmlspecialchars($case['final_quantity'] ?? '-', ENT_QUOTES) ?></div>
+          <div class="k">Price (INR)</div><div class="v"><?= $case['final_price'] !== null && $case['final_price'] !== '' ? htmlspecialchars(number_format((float) $case['final_price'], 2), ENT_QUOTES) : '-' ?></div>
+          <div class="k">Courier</div><div class="v"><?= htmlspecialchars($case['courier'] ?? '-', ENT_QUOTES) ?></div>
+          <div class="k">Dispatch date</div><div class="v"><?= htmlspecialchars($case['dispatch_date'] ?? '-', ENT_QUOTES) ?></div>
+        </div>
+      <?php else: ?>
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="update_final">
         <input type="hidden" name="expected_lock_version" value="<?= (int) $case['lock_version'] ?>">
         <div class="field-row three">
-          <label class="field"><span class="lbl">Final formulation</span><input type="text" name="final_formulation" value="<?= htmlspecialchars($case['final_formulation'] ?? '', ENT_QUOTES) ?>"></label>
-          <label class="field"><span class="lbl">Concentration / strength</span><input type="text" name="final_concentration" value="<?= htmlspecialchars($case['final_concentration'] ?? '', ENT_QUOTES) ?>"></label>
-          <label class="field"><span class="lbl">Quantity</span><input type="text" name="final_quantity" value="<?= htmlspecialchars($case['final_quantity'] ?? '', ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Final formulation</span><input type="text" name="final_formulation" value="<?= htmlspecialchars((string) $tv('update_final', 'final_formulation', $case['final_formulation']), ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Concentration / strength</span><input type="text" name="final_concentration" value="<?= htmlspecialchars((string) $tv('update_final', 'final_concentration', $case['final_concentration']), ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Quantity</span><input type="text" name="final_quantity" value="<?= htmlspecialchars((string) $tv('update_final', 'final_quantity', $case['final_quantity']), ENT_QUOTES) ?>"></label>
         </div>
         <div class="field-row three">
-          <label class="field"><span class="lbl">Price (INR)</span><input type="number" step="0.01" name="final_price" value="<?= htmlspecialchars($case['final_price'] ?? '', ENT_QUOTES) ?>"></label>
-          <label class="field"><span class="lbl">Courier</span><input type="text" name="courier" value="<?= htmlspecialchars($case['courier'] ?? '', ENT_QUOTES) ?>"></label>
-          <label class="field"><span class="lbl">Tracking number</span><input type="text" name="tracking_number" value="<?= htmlspecialchars($case['tracking_number'] ?? '', ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Price (INR)</span><input type="number" step="0.01" name="final_price" value="<?= htmlspecialchars((string) $tv('update_final', 'final_price', $case['final_price']), ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Courier</span><input type="text" name="courier" value="<?= htmlspecialchars((string) $tv('update_final', 'courier', $case['courier']), ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Tracking number</span><input type="text" name="tracking_number" value="<?= htmlspecialchars((string) $tv('update_final', 'tracking_number', $case['tracking_number']), ENT_QUOTES) ?>"></label>
         </div>
         <div class="field-row two">
-          <label class="field"><span class="lbl">Dispatch date</span><input type="date" name="dispatch_date" value="<?= htmlspecialchars($case['dispatch_date'] ?? '', ENT_QUOTES) ?>"></label>
-          <label class="field"><span class="lbl">Closure reason (if closing)</span><input type="text" name="closure_reason" value="<?= htmlspecialchars($case['closure_reason'] ?? '', ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Dispatch date</span><input type="date" name="dispatch_date" value="<?= htmlspecialchars((string) $tv('update_final', 'dispatch_date', $case['dispatch_date']), ENT_QUOTES) ?>"></label>
+          <label class="field"><span class="lbl">Closure reason (if closing)</span><input type="text" name="closure_reason" value="<?= htmlspecialchars((string) $tv('update_final', 'closure_reason', $case['closure_reason']), ENT_QUOTES) ?>"></label>
         </div>
         <button type="submit" class="btn-secondary">Save Case Details</button>
       </form>
+      <?php endif; ?>
     </div>
 
     <div class="card-panel">
+      <?php if ($isErased): ?>
+        <h2>Status history</h2>
+      <?php else: ?>
       <h2>Status</h2>
       <form method="POST">
         <?= csrf_field() ?>
@@ -430,30 +563,36 @@ require __DIR__ . '/../../includes/layout-header.php';
           <label class="field">
             <span class="lbl">New status</span>
             <select name="new_status">
+              <?php $chosenStatus = $tv('change_status', 'new_status', $case['status']); if (!in_array($chosenStatus, $statuses, true)) $chosenStatus = $case['status']; ?>
               <?php foreach ($statuses as $s): ?>
-                <option value="<?= $s ?>" <?= $case['status'] === $s ? 'selected' : '' ?>><?= ucwords(str_replace('_', ' ', $s)) ?></option>
+                <option value="<?= $s ?>" <?= $chosenStatus === $s ? 'selected' : '' ?>><?= status_label($s) ?></option>
               <?php endforeach; ?>
             </select>
           </label>
           <label class="field">
             <span class="lbl">Note (optional)</span>
-            <input type="text" name="status_note" placeholder="e.g. Formulation discussed and confirmed by treating veterinarian">
+            <input type="text" name="status_note" value="<?= htmlspecialchars((string) $tv('change_status', 'status_note', ''), ENT_QUOTES) ?>" placeholder="e.g. Formulation discussed and confirmed by treating veterinarian">
           </label>
         </div>
         <button type="submit" class="btn-primary">Update Status</button>
       </form>
 
       <h2 style="margin-top:2rem;">History</h2>
+      <?php endif; ?>
       <?php foreach ($history as $h): ?>
         <div class="note-item">
           <div class="note-meta"><?= htmlspecialchars($h['staff_name'] ?? 'System', ENT_QUOTES) ?> · <?= htmlspecialchars(fmt_time($h['created_at']), ENT_QUOTES) ?></div>
-          <div class="note-body"><?= $h['previous_status'] ? ucwords(str_replace('_',' ',$h['previous_status'])) . ' → ' : '' ?><?= ucwords(str_replace('_',' ',$h['new_status'])) ?><?= $h['note'] ? ' — ' . htmlspecialchars($h['note'], ENT_QUOTES) : '' ?></div>
+          <div class="note-body"><?= $h['previous_status'] ? status_label($h['previous_status']) . ' → ' : '' ?><?= status_label($h['new_status']) ?><?= $h['note'] ? ' - ' . htmlspecialchars($h['note'], ENT_QUOTES) : '' ?></div>
         </div>
       <?php endforeach; ?>
     </div>
 
     <div class="card-panel">
       <h2>Assigned staff</h2>
+      <?php if ($isErased): ?>
+        <?php $assignedName = 'Unassigned'; foreach ($allStaff as $s) { if ((int) $s['id'] === (int) $case['assigned_staff_id']) $assignedName = $s['name']; } ?>
+        <div class="kv-grid"><div class="k">Assigned to</div><div class="v"><?= htmlspecialchars($assignedName, ENT_QUOTES) ?></div></div>
+      <?php else: ?>
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="assign_staff">
@@ -464,22 +603,24 @@ require __DIR__ . '/../../includes/layout-header.php';
             <select name="assigned_staff_id">
               <option value="">Unassigned</option>
               <?php foreach ($allStaff as $s): ?>
-                <option value="<?= (int) $s['id'] ?>" <?= (int) $case['assigned_staff_id'] === (int) $s['id'] ? 'selected' : '' ?>><?= htmlspecialchars($s['name'], ENT_QUOTES) ?></option>
+                <option value="<?= (int) $s['id'] ?>" <?= (int) $tv('assign_staff', 'assigned_staff_id', $case['assigned_staff_id']) === (int) $s['id'] ? 'selected' : '' ?>><?= htmlspecialchars($s['name'], ENT_QUOTES) ?><?= (int) $s['active'] === 1 ? '' : ' (deactivated)' ?></option>
               <?php endforeach; ?>
             </select>
           </label>
           <button type="submit" class="btn-secondary" style="align-self:end;">Save</button>
         </div>
       </form>
+      <?php endif; ?>
     </div>
 
+    <?php if (!$isErased): ?>
     <div class="card-panel">
       <h2>Internal notes (staff only)</h2>
       <form method="POST">
         <?= csrf_field() ?>
         <input type="hidden" name="action" value="add_note">
         <label class="field">
-          <textarea name="content" rows="3" placeholder="e.g. Called veterinarian, requested updated prescription"></textarea>
+          <textarea name="content" rows="3" placeholder="e.g. Called veterinarian, requested updated prescription"><?= htmlspecialchars((string) $tv('add_note', 'content', ''), ENT_QUOTES) ?></textarea>
         </label>
         <button type="submit" class="btn-secondary">Add Note</button>
       </form>
@@ -493,7 +634,7 @@ require __DIR__ . '/../../includes/layout-header.php';
 
     <div class="card-panel">
       <h2>Send an email</h2>
-      <p class="field-hint" style="margin-bottom:1rem;">Nothing is ever sent automatically. Pick a template, review and edit the formulation, price and payment link, then send it yourself — or mark that no email is needed.</p>
+      <p class="field-hint" style="margin-bottom:1rem;">Nothing is ever sent automatically. Pick a template, review and edit the formulation, price and payment link, then send it yourself - or mark that no email is needed.</p>
       <form method="POST">
         <?= csrf_field() ?>
         <?= one_time_field('send_email:' . $id) ?>
@@ -519,8 +660,8 @@ require __DIR__ . '/../../includes/layout-header.php';
           <label class="field">
             <span class="lbl">Recipient</span>
             <select name="recipient">
-              <?php if ($case['owner_email']): ?><option value="<?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['owner_email'] ? 'selected' : '' ?>>Owner — <?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?></option><?php endif; ?>
-              <?php if ($case['vet_email']): ?><option value="<?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['vet_email'] ? 'selected' : '' ?>>Veterinarian — <?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?></option><?php endif; ?>
+              <?php if ($case['owner_email']): ?><option value="<?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['owner_email'] ? 'selected' : '' ?>>Owner - <?= htmlspecialchars($case['owner_email'], ENT_QUOTES) ?></option><?php endif; ?>
+              <?php if ($case['vet_email']): ?><option value="<?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?>" <?= ($draft['recipient'] ?? '') === $case['vet_email'] ? 'selected' : '' ?>>Veterinarian - <?= htmlspecialchars($case['vet_email'], ENT_QUOTES) ?></option><?php endif; ?>
             </select>
           </label>
           <label class="field">
@@ -547,10 +688,14 @@ require __DIR__ . '/../../includes/layout-header.php';
         <div class="note-item">
           <div class="note-meta">
             <?= htmlspecialchars($e['staff_name'] ?? 'System', ENT_QUOTES) ?> · <?= htmlspecialchars($e['sender'] ?? SENDER_EMAIL, ENT_QUOTES) ?> → <?= htmlspecialchars($e['recipient'], ENT_QUOTES) ?> · <?= htmlspecialchars(fmt_time($e['sent_at']), ENT_QUOTES) ?>
-            <span class="status-pill <?= $e['delivery_status'] === 'sent' ? 'status-approved' : 'status-rejected' ?>" style="margin-left:0.5rem;"><?= htmlspecialchars(ucfirst($e['delivery_status'] ?? 'unknown'), ENT_QUOTES) ?></span>
+            <span class="status-pill <?= $e['delivery_status'] === 'sent' ? 'status-approved' : ($e['delivery_status'] === 'unknown' ? '' : 'status-rejected') ?>" style="margin-left:0.5rem;"><?= htmlspecialchars($e['delivery_status'] === 'unknown' ? 'Unconfirmed' : ucfirst($e['delivery_status'] ?? 'unknown'), ENT_QUOTES) ?></span>
           </div>
+          <?php if ($e['delivery_status'] === 'unknown'): ?>
+            <div class="note-meta">May have been sent: check Brevo's transactional email logs for this address before sending it again.</div>
+          <?php endif; ?>
           <div class="note-body"><strong><?= htmlspecialchars($e['subject'], ENT_QUOTES) ?></strong><br><?= nl2br(htmlspecialchars($e['body'], ENT_QUOTES)) ?></div>
         </div>
       <?php endforeach; ?>
     </div>
+    <?php endif; ?>
 <?php require __DIR__ . '/../../includes/layout-footer.php'; ?>

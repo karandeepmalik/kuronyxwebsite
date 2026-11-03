@@ -16,14 +16,18 @@ define('DB_PASS', 'your_database_password');
 // Absolute filesystem path to the off-webroot folder for prescriptions/documents.
 // This must sit OUTSIDE public_html so the FTPS deploy (which only syncs public_html/)
 // never touches it. Example on Hostinger: '/home/u818223526/domains/kuronyx.in/private_storage'
+// REQUIRED on the live server: left empty, uploads and documents are refused there (a 503 and a line in the
+// error log) instead of quietly filling a second folder. Local development may leave it empty (it then uses
+// ../private_storage_fallback).
 define('PRIVATE_STORAGE_PATH', '');
 
 // Absolute path to a private, off-webroot folder for PHP session files (sibling of the
-// storage folder above, e.g. '/home/u818223526/domains/kuronyx.in/private_sessions').
-// Optional — falls back to a local ../session_fallback folder if unset. PHP's default
-// session directory is the shared system temp dir, which on shared hosting other accounts
-// may be able to read.
-// define('SESSION_SAVE_PATH', '');
+// storage folder above, e.g. '/home/u818223526/domains/kuronyx.in/sessions'). The folder
+// must already exist and be writable - create it first (Hostinger File Manager), or logins fail.
+// Left empty it falls back to a local ../session_fallback folder (also outside public_html).
+// PHP's default session directory is the shared system temp dir, which on shared hosting
+// other accounts may be able to read, so set this on the server.
+define('SESSION_SAVE_PATH', '');
 
 // Set to true ONLY after confirming that production really sits behind a proxy/CDN that
 // sets X-Forwarded-For (check with a temporary page printing $_SERVER['REMOTE_ADDR'] and
@@ -47,7 +51,7 @@ define('SETUP_TOKEN', '');
 // Get the key from Brevo → Settings → SMTP & API → API Keys.
 define('BREVO_API_KEY', '');
 define('BREVO_TEMPLATE_ID', 1);          // welcome-email template (newsletter subscribe)
-define('BREVO_ENQUIRY_TEMPLATE_ID', 3);  // contact-us enquiry template
+define('BREVO_ENQUIRY_TEMPLATE_ID', 3);  // "Write to us" enquiry template (the Home page form)
 define('BREVO_LIST_ID', 7);              // newsletter contact list
 
 // Public base URL used in links the app emails out (password reset). Optional — defaults
@@ -84,13 +88,19 @@ define('EMAIL_DRY_RUN', false);
 
 // --- Optional abuse-protection settings (all have safe defaults) ---
 
-// Cloudflare Turnstile CAPTCHA on the two anonymous upload forms (/for-cat-owners and
-// /for-veterinarians/apply). Free; create a widget at dash.cloudflare.com -> Turnstile
-// (the site does NOT need to be on Cloudflare). Leave both unset to run without a CAPTCHA.
-// define('TURNSTILE_SITE_KEY', '');
-// define('TURNSTILE_SECRET_KEY', '');
+// Cloudflare Turnstile CAPTCHA on the anonymous forms (the two upload forms /for-cat-owners and
+// /for-veterinarians/apply, the Write to us enquiry and the newsletter). Free; create a widget at dash.cloudflare.com -> Turnstile
+// (the site does NOT need to be on Cloudflare). Fill in BOTH on the server: while either is
+// empty there is no CAPTCHA and no warning (local dev and the tests run that way on purpose).
+define('TURNSTILE_SITE_KEY', '');
+define('TURNSTILE_SECRET_KEY', '');
 
 // How many months after a finished/closed/cancelled/rejected case was last touched it appears on
 // the admin Data Erasure page's review list (nothing is deleted automatically). 36 is only a
 // placeholder: confirm how long prescription/dispensing records must legally be kept first.
 // define('RETENTION_MONTHS', 36);
+
+// How many months after a veterinary application was REJECTED it appears on the Data Erasure page's review
+// list (nothing is deleted automatically). Default 12: no law fixes a period for rejected applications, and
+// a year leaves room for an appeal or a re-application. Keep the Privacy Policy (section 17) in step.
+// define('VET_APPLICATION_RETENTION_MONTHS', 12);

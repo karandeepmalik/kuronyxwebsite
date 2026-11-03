@@ -4,7 +4,11 @@ require __DIR__ . '/../../includes/auth.php';
 $staff = require_role(['admin']);
 
 $pdo = db();
-$flash = null;
+
+// The result of creating an account (new.php redirects here), shown once: whether the invitation email went
+// out is the part the admin needs to see. A POST below replaces it with its own message.
+$flash = $_SESSION['staff_flash'] ?? null;
+unset($_SESSION['staff_flash']);
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!csrf_verify()) {
@@ -67,7 +71,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 audit($setActive ? 'staff_reactivated' : 'staff_deactivated', 'staff_user', $targetId, []);
                 return ['type' => 'ok', 'text' => $setActive
                     ? 'Account reactivated.'
-                    : 'Account deactivated — they will be signed out on their next request.'];
+                    : 'Account deactivated - they will be signed out on their next request.'];
             });
         }
     }
@@ -75,7 +79,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $rows = $pdo->query('SELECT id, name, email, role, active, created_at FROM staff_users ORDER BY created_at ASC')->fetchAll();
 
-$pageTitle     = 'Staff Accounts — Kuronyx Admin';
+$pageTitle     = 'Staff Accounts - Kuronyx Admin';
 $robotsNoindex = true;
 $backHref      = '/admin/gs-requests/';
 $backLabel     = 'GS-441524 requests';
@@ -86,14 +90,11 @@ require __DIR__ . '/../../includes/layout-header.php';
     <h1 class="doc-title">Staff Accounts</h1>
     <?php $activeAdminNav = 'staff'; require __DIR__ . '/../../includes/admin-nav.php'; ?>
 
-    <?php if (!empty($_GET['created'])): ?>
-      <div class="alert alert-ok">Staff account created.</div>
-    <?php endif; ?>
     <?php if ($flash): ?>
       <div class="alert <?= $flash['type'] === 'ok' ? 'alert-ok' : '' ?>"><?= htmlspecialchars($flash['text'], ENT_QUOTES) ?></div>
     <?php endif; ?>
 
-    <a href="/admin/staff/new.php" class="btn-primary" style="margin-bottom:1.5rem; display:inline-flex;">New Staff Account</a>
+    <a href="/admin/staff/new.php" class="btn-primary page-action">New Staff Account</a>
 
     <div class="table-scroll">
     <table class="data-table">
@@ -112,7 +113,7 @@ require __DIR__ . '/../../includes/layout-header.php';
                   <?= csrf_field() ?>
                   <input type="hidden" name="staff_id" value="<?= (int) $r['id'] ?>">
                   <input type="hidden" name="set_active" value="<?= (int) $r['active'] === 1 ? 0 : 1 ?>">
-                  <button type="submit" class="btn-secondary" style="padding:0.4rem 0.8rem; font-size:0.625rem;"><?= (int) $r['active'] === 1 ? 'Deactivate' : 'Reactivate' ?></button>
+                  <button type="submit" class="btn-secondary btn-sm"><?= (int) $r['active'] === 1 ? 'Deactivate' : 'Reactivate' ?></button>
                 </form>
               <?php endif; ?>
             </td>

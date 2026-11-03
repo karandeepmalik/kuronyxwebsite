@@ -77,6 +77,7 @@ final class TestEnv {
                   . "define('DB_USER', '');\n"
                   . "define('DB_PASS', '');\n")
             . "define('PRIVATE_STORAGE_PATH', " . var_export($this->storageDir, true) . ");\n"
+            . "define('ORPHAN_SWEEP_ONE_IN', 1);\n" // every successful intake submission sweeps, so the trigger can be tested
             . "define('SETUP_TOKEN', 'test-setup-token');\n"
             . "define('BREVO_API_KEY', 'test-key-not-real');\n"
             . "define('SENDER_EMAIL', 'hello@kuronyx.in');\n"
@@ -88,7 +89,9 @@ final class TestEnv {
             . "define('BREVO_VERIFIED_SENDERS', ['hello@kuronyx.in' => 'Kuronyx Sciences', 'ops@kuronyx.in' => 'Kuronyx Sciences Ops']);\n"
             . "define('BREVO_WEBHOOK_SECRET', 'test-webhook-secret-not-real');\n"
             . "define('EMAIL_DRY_RUN', true);\n"
-            . "define('EMAIL_DRY_RUN_LOG', " . var_export($this->dryRunEmailsPath, true) . ");\n";
+            . "define('EMAIL_DRY_RUN_LOG', " . var_export($this->dryRunEmailsPath, true) . ");\n"
+            . "define('EMAIL_DRY_RUN_FAIL_TO', 'send-fails@example.test');\n"
+            . "define('EMAIL_DRY_RUN_UNKNOWN_TO', 'send-unconfirmed@example.test');\n";
         file_put_contents($this->configPath, $config);
 
         if ($this->isMysql) {

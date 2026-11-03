@@ -5,22 +5,42 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
 }
 
 require_once __DIR__ . '/storage-path.php';
+require_once __DIR__ . '/upload-limits.php'; // MAX_UPLOAD_BYTES, upload_size_text(), upload_limit_bytes(), upload_error_message()
 
 const ALLOWED_UPLOAD_MIME = [
     'application/pdf' => 'pdf',
     'image/jpeg'       => 'jpg',
     'image/png'        => 'png',
 ];
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // 10MB
-
 class UploadException extends \RuntimeException {}
 
 const PDF_ACTIVE_CONTENT_PATTERN = '#/(JavaScript|JS|Launch|EmbeddedFiles?|RichMedia)(?![A-Za-z])#';
 // Total bytes of decompressed stream data inspected per PDF - a bound against zip bombs.
 const PDF_SCAN_MAX_INFLATED_BYTES = 32 * 1024 * 1024;
 
+// Inflates one zlib stream, but STOPS as soon as the output passes $max bytes (returns null), and returns null for data that is
+// not valid or not complete. gzuncompress($data, $max) was used here before and its limit does not hold: PHP returned a 34 MB
+// stream at a 32 MB limit (found in a review follow-up), so a zip bomb was only ever stopped by memory_limit (a fatal error).
+// This feeds the compressed bytes in small pieces and checks the size after each, so memory stays near $max plus a few MB
+// (4 KB of input unpacks to at most about 4 MB). Checked 2026-11-02: a stream of 1000 MB unpacked is refused in ~0.2 s at ~47 MB.
+function pdf_inflate_capped(string $data, int $max): ?string {
+    $ctx = @inflate_init(ZLIB_ENCODING_DEFLATE);
+    if ($ctx === false) return null;
+    $out = '';
+    foreach (str_split($data, 4096) as $chunk) {
+        $piece = @inflate_add($ctx, $chunk, ZLIB_SYNC_FLUSH);
+        if ($piece === false) return null;
+        $out .= $piece;
+        if (strlen($out) > $max) return null;
+        if (inflate_get_status($ctx) === ZLIB_STREAM_END) break; // anything after the end (the newline before "endstream") is ignored
+    }
+    return inflate_get_status($ctx) === ZLIB_STREAM_END ? $out : null; // a truncated stream is not readable either
+}
+
 // Heuristic check (not a virus scan) for PDFs carrying scripts, launch actions or embedded
-// files. Returns 'clean', 'active' or 'unscannable' (encrypted: the content can't be read).
+// files. Returns 'clean', 'active', 'encrypted' (the content is locked) or 'unscannable' (we could not read it ourselves:
+// object streams bigger than the inflate budget, or a compression we cannot decode). Encrypted and unscannable used to be
+// ONE verdict and one message, so a normal but large or unusual scanner PDF was told it was encrypted (a Karandeep review comment).
 // A plain text search misses the two usual ways of hiding those names, so this also
 //   - decodes #xx escapes inside PDF names (/J#53 is /JS), and
 //   - inflates FlateDecode streams, since PDF 1.5 object streams ("/ObjStm") hold ordinary
@@ -30,7 +50,7 @@ function pdf_active_content_verdict(string $pdf): string {
         '/#([0-9A-Fa-f]{2})/', fn($m) => chr(hexdec($m[1])), $s
     );
     if (preg_match('#/Encrypt(?![A-Za-z])#', $pdf)) {
-        return 'unscannable';
+        return 'encrypted';
     }
     if (preg_match(PDF_ACTIVE_CONTENT_PATTERN, $normalize($pdf))) {
         return 'active';
@@ -51,14 +71,24 @@ function pdf_active_content_verdict(string $pdf): string {
         if (($pdf[$dataStart] ?? '') === "\r") $dataStart++;
         if (($pdf[$dataStart] ?? '') === "\n") $dataStart++;
         if ($budget <= 0) return 'unscannable';
-        $inflated = @gzuncompress(substr($pdf, $dataStart, $end - $dataStart), $budget);
-        if ($inflated === false) return 'unscannable'; // an object stream we can't read: refuse rather than guess
+        $inflated = pdf_inflate_capped(substr($pdf, $dataStart, $end - $dataStart), $budget);
+        if ($inflated === null) return 'unscannable'; // unreadable, truncated, or bigger than what is left of the budget: refuse rather than guess
         $budget -= strlen($inflated);
         if (preg_match(PDF_ACTIVE_CONTENT_PATTERN, $normalize($inflated))) {
             return 'active';
         }
     }
     return 'clean';
+}
+
+// Did the person choose a file for this field? Answered from PHP's upload ERROR code, never from the file's name:
+// empty($_FILES[x]['name']) is true for a file literally called "0" (PHP's empty() treats the string "0" as empty), so a
+// document with that name was reported missing (required fields) or silently skipped (optional ones). A browser that
+// was given no file sends error UPLOAD_ERR_NO_FILE; a crafted array-valued field counts as chosen so that
+// store_uploaded_file() can refuse it as invalid.
+function upload_was_chosen(string $field): bool {
+    $error = $_FILES[$field]['error'] ?? UPLOAD_ERR_NO_FILE;
+    return is_array($error) || (int) $error !== UPLOAD_ERR_NO_FILE;
 }
 
 // Validates and stores one uploaded file (from $_FILES[$field]) off-webroot under
@@ -72,13 +102,21 @@ function store_uploaded_file(array $file, string $subfolder): array {
         throw new UploadException('No file was uploaded.');
     }
     if ($file['error'] !== UPLOAD_ERR_OK) {
-        throw new UploadException('Upload failed. Please try again.');
+        // The size codes name the real limit and the others say what happened (see upload_error_message()); the ones that mean
+        // OUR server could not store the file are also logged, because the visitor cannot fix them.
+        if (in_array($file['error'], [UPLOAD_ERR_NO_TMP_DIR, UPLOAD_ERR_CANT_WRITE, UPLOAD_ERR_EXTENSION], true)) {
+            error_log('[upload] PHP could not store an uploaded file (upload error ' . (int) $file['error'] . '): check upload_tmp_dir, disk space and extensions.');
+        }
+        throw new UploadException(upload_error_message((int) $file['error']));
     }
     if (!is_uploaded_file($file['tmp_name'])) {
         throw new UploadException('Invalid upload.');
     }
-    if ($file['size'] <= 0 || $file['size'] > MAX_UPLOAD_BYTES) {
-        throw new UploadException('File is empty or exceeds the 10MB limit.');
+    if ($file['size'] <= 0) {
+        throw new UploadException('That file is empty. Please choose a different file.');
+    }
+    if ($file['size'] > MAX_UPLOAD_BYTES) {
+        throw new UploadException('That file is ' . upload_size_text((int) $file['size']) . ' - the limit is ' . upload_size_text(MAX_UPLOAD_BYTES) . ' per file. Please choose a smaller file, or a compressed copy.');
     }
 
     $finfo = new finfo(FILEINFO_MIME_TYPE);
@@ -92,8 +130,12 @@ function store_uploaded_file(array $file, string $subfolder): array {
     // cheap heuristic (it can be dodged by obfuscating the names), not a virus scan.
     if ($mime === 'application/pdf') {
         $verdict = pdf_active_content_verdict((string) file_get_contents($file['tmp_name'], false, null, 0, MAX_UPLOAD_BYTES));
-        if ($verdict === 'unscannable') {
+        if ($verdict === 'encrypted') {
             throw new UploadException('This PDF is encrypted, so it cannot be checked and cannot be accepted. Please upload an unprotected PDF, or a photo of the document.');
+        }
+        if ($verdict === 'unscannable') {
+            // Not encrypted: we just could not read it ourselves (very large, or an unusual scanner format). Say so honestly.
+            throw new UploadException("We couldn't check this PDF automatically, so we can't accept it. Please upload a photo or scan of the document (JPG or PNG) instead.");
         }
         if ($verdict === 'active') {
             throw new UploadException('This PDF contains scripts or embedded files and cannot be accepted. Please upload a plain PDF, or a photo of the document.');

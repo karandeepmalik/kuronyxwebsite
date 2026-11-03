@@ -89,14 +89,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$pageTitle       = 'Veterinarian Sign In — Kuronyx Sciences';
-$pageDescription = 'Sign in to your Kuronyx veterinary account to submit and track GS-441524 requests.';
+$pageTitle       = 'Log in | Kuronyx';
+$pageDescription = 'Log in to your Kuronyx veterinary account to submit and track prescription requests.';
 $robotsNoindex   = true;
 $activeNav       = 'for-veterinarians';
 require __DIR__ . '/../includes/layout-header.php';
 ?>
-    <p class="doc-eyebrow">For veterinarians · Portal sign in</p>
-    <h1 class="doc-title">Sign in</h1>
+    <p class="doc-eyebrow">For veterinarians · Portal log in</p>
+    <h1 class="doc-title">Log in</h1>
 
     <?php if (!empty($errors['_form'])): ?>
       <div class="alert"><?= htmlspecialchars($errors['_form'], ENT_QUOTES) ?></div>
@@ -112,7 +112,7 @@ require __DIR__ . '/../includes/layout-header.php';
         <span class="lbl">Password</span>
         <input type="password" name="password" required>
       </label>
-      <button type="submit" class="btn-primary" style="margin-top:1rem;">Sign In</button>
+      <button type="submit" class="btn-primary" style="margin-top:1rem;">Log in</button>
     </form>
 
     <p style="margin-top:2rem; font-size:0.8125rem; color:var(--paper-3);">
@@ -125,6 +125,6 @@ require __DIR__ . '/../includes/layout-header.php';
       Recently approved and haven't set a password yet? Check your email for the activation link sent when your application was approved.
     </p>
     <p style="margin-top:1rem; font-size:0.8125rem; color:var(--paper-3);">
-      Don't have an account yet? <a href="/for-veterinarians/apply" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Apply for a Veterinary Account</a>.
+      Don't have an account yet? <a href="/for-veterinarians/apply/" style="color:var(--paper); border-bottom:1px solid var(--paper-3);">Apply for a veterinary account</a>.
     </p>
 <?php require __DIR__ . '/../includes/layout-footer.php'; ?>

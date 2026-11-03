@@ -53,7 +53,7 @@ if ($email && $_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Unsubscribe — Kuronyx Sciences</title>
+  <title>Unsubscribe | Kuronyx</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#22384A; font-family:'Helvetica Neue',Helvetica,Arial,sans-serif; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
@@ -68,11 +68,11 @@ if ($email && $_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
   <div class="card">
-    <div class="logo">Kuronyx Sciences Pvt Ltd</div>
+    <div class="logo">Kuronyx Sciences Pvt. Ltd.</div>
     <hr class="rule"/>
     <?php if ($done): ?>
       <h1>You've been unsubscribed.</h1>
-      <p>You will no longer receive Field Dispatches emails. We're sorry to see you go.</p>
+      <p>You will no longer receive Journal emails. We're sorry to see you go.</p>
     <?php elseif ($limited): ?>
       <h1>Too many requests.</h1>
       <p class="error">Please try again later, or contact us at hello@kuronyx.in.</p>
@@ -81,7 +81,7 @@ if ($email && $_SERVER['REQUEST_METHOD'] === 'POST') {
       <p class="error">We couldn't process your request. Please try again or contact us at hello@kuronyx.in.</p>
     <?php elseif ($email): ?>
       <h1>Unsubscribe?</h1>
-      <p>Stop sending Field Dispatches emails to <strong><?= htmlspecialchars($email, ENT_QUOTES) ?></strong>?</p>
+      <p>Stop sending Journal emails to <strong><?= htmlspecialchars($email, ENT_QUOTES) ?></strong>?</p>
       <form method="POST" style="margin-top:24px;">
         <?= csrf_field() ?>
         <input type="hidden" name="email" value="<?= htmlspecialchars($email, ENT_QUOTES) ?>">

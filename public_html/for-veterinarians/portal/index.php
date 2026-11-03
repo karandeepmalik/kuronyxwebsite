@@ -10,7 +10,7 @@ $stmt = db()->prepare(
 $stmt->execute([$vet['id']]);
 $rows = $stmt->fetchAll();
 
-$pageTitle     = 'Veterinary Portal — Kuronyx Sciences';
+$pageTitle     = 'Veterinary Portal - Kuronyx Sciences';
 $robotsNoindex = true;
 $activeNav     = 'for-veterinarians';
 $wideWrap      = true;
@@ -19,7 +19,7 @@ require __DIR__ . '/../../includes/layout-header.php';
     <p class="doc-eyebrow">Veterinary portal · <?= htmlspecialchars($vet['full_name'], ENT_QUOTES) ?></p>
     <h1 class="doc-title">Your GS-441524 requests</h1>
     <p class="lead" style="margin-bottom:1.5rem;">
-      <form method="POST" action="/for-veterinarians/portal/logout.php" style="display:inline;"><?= csrf_field() ?><button type="submit" style="font:inherit; background:none; border:0; border-bottom:1px solid var(--paper-3); color:var(--paper); cursor:pointer; padding:0;">Sign out</button></form>
+      <form method="POST" action="/for-veterinarians/portal/logout.php" style="display:inline;"><?= csrf_field() ?><button type="submit" style="font:inherit; background:none; border:0; border-bottom:1px solid var(--paper-3); color:var(--paper); cursor:pointer; padding:0;">Log out</button></form>
     </p>
 
     <a href="/for-veterinarians/portal/new-request.php" class="btn-primary" style="margin-bottom:1.75rem; display:inline-flex;">New Request</a>
@@ -36,7 +36,7 @@ require __DIR__ . '/../../includes/layout-header.php';
             <td><a href="/for-veterinarians/portal/view.php?id=<?= (int) $r['id'] ?>">GS-<?= (int) $r['id'] ?></a></td>
             <td><?= htmlspecialchars($r['patient_name'], ENT_QUOTES) ?></td>
             <td><?= ucfirst($r['requested_formulation']) ?></td>
-            <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $r['status'])) ?></span></td>
+            <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= htmlspecialchars(status_label($r['status']), ENT_QUOTES) ?></span></td>
             <td><?= htmlspecialchars(fmt_time($r['created_at']), ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars(fmt_time($r['updated_at']), ENT_QUOTES) ?></td>
           </tr>

@@ -3,9 +3,15 @@ require __DIR__ . '/../../includes/db.php';
 require __DIR__ . '/../../includes/auth.php';
 $staff = require_login();
 
-$status      = $_GET['status'] ?? '';
-$source      = $_GET['source'] ?? '';
-$formulation = $_GET['formulation'] ?? '';
+require_once __DIR__ . '/../../includes/case-statuses.php';
+$statuses = GS_CASE_STATUSES; // the single shared list - see includes/case-statuses.php
+
+// Only known values are accepted for the three dropdown filters; anything else (a typo such as
+// ?status=aproved) is ignored and reported in a note, instead of silently matching nothing.
+$ignoredFilters = [];
+$status      = list_filter('status', $statuses, $ignoredFilters);
+$source      = list_filter('source', ['veterinarian', 'cat_owner'], $ignoredFilters);
+$formulation = list_filter('formulation', ['injection', 'oral'], $ignoredFilters);
 $q           = trim($_GET['q'] ?? '');
 
 $where  = [];
@@ -21,7 +27,9 @@ if ($q !== '') {
 $sql = 'SELECT id, source, owner_full_name, patient_name, requested_formulation, status, created_at, updated_at FROM gs_requests';
 if ($where) $sql .= ' WHERE ' . implode(' AND ', $where);
 $page = list_page();
-$sql .= ' ORDER BY created_at DESC LIMIT ' . (LIST_PAGE_SIZE + 1) . ' OFFSET ' . (($page - 1) * LIST_PAGE_SIZE);
+// id DESC breaks ties: created_at only has 1-second resolution, so rows from one burst share
+// a timestamp and, without a unique tiebreaker, LIMIT/OFFSET can repeat or skip them across pages.
+$sql .= ' ORDER BY created_at DESC, id DESC LIMIT ' . (LIST_PAGE_SIZE + 1) . ' OFFSET ' . (($page - 1) * LIST_PAGE_SIZE);
 
 $stmt = db()->prepare($sql);
 $stmt->execute($params);
@@ -29,18 +37,17 @@ $rows = $stmt->fetchAll();
 $hasMore = count($rows) > LIST_PAGE_SIZE;
 $rows = array_slice($rows, 0, LIST_PAGE_SIZE);
 
-$statuses = ['submitted','under_review','awaiting_information','communication_in_progress','formulation_discussion','approved','compounding','ready_for_dispatch','dispatched','finished','closed','cancelled','rejected'];
-
-$pageTitle     = 'GS-441524 Requests — Kuronyx Admin';
+$pageTitle     = 'GS-441524 Requests - Kuronyx Admin';
 $robotsNoindex = true;
-$backHref      = '/admin/gs-requests/';
-$backLabel     = 'Admin';
+$backHref      = '/'; // this page IS the admin home (admin/index.php redirects here), so no Back button - '/' hides it
 $wideWrap      = true;
 require __DIR__ . '/../../includes/layout-header.php';
 ?>
     <p class="doc-eyebrow">Admin · <?= htmlspecialchars($staff['name'], ENT_QUOTES) ?> (<?= htmlspecialchars($staff['role'], ENT_QUOTES) ?>)</p>
     <h1 class="doc-title">GS-441524 Requests</h1>
     <?php $activeAdminNav = 'gs-requests'; require __DIR__ . '/../../includes/admin-nav.php'; ?>
+
+    <?= list_ignored_filters_notice($ignoredFilters) ?>
 
     <form method="GET" class="filter-bar">
       <label class="field">
@@ -52,7 +59,7 @@ require __DIR__ . '/../../includes/layout-header.php';
         <select name="status">
           <option value="">All</option>
           <?php foreach ($statuses as $s): ?>
-            <option value="<?= $s ?>" <?= $status === $s ? 'selected' : '' ?>><?= ucwords(str_replace('_', ' ', $s)) ?></option>
+            <option value="<?= $s ?>" <?= $status === $s ? 'selected' : '' ?>><?= status_label($s) ?></option>
           <?php endforeach; ?>
         </select>
       </label>
@@ -93,7 +100,7 @@ require __DIR__ . '/../../includes/layout-header.php';
             <td><?= htmlspecialchars($r['owner_full_name'], ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars($r['patient_name'], ENT_QUOTES) ?></td>
             <td><?= ucfirst($r['requested_formulation']) ?></td>
-            <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= ucwords(str_replace('_', ' ', $r['status'])) ?></span></td>
+            <td><span class="status-pill status-<?= htmlspecialchars($r['status'], ENT_QUOTES) ?>"><?= htmlspecialchars(status_label($r['status']), ENT_QUOTES) ?></span></td>
             <td><?= htmlspecialchars(fmt_time($r['created_at']), ENT_QUOTES) ?></td>
             <td><?= htmlspecialchars(fmt_time($r['updated_at']), ENT_QUOTES) ?></td>
           </tr>

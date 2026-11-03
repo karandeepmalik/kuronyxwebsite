@@ -9,8 +9,10 @@ if (basename($_SERVER['SCRIPT_FILENAME'] ?? '') === basename(__FILE__)) {
     exit('Forbidden.');
 }
 
+require_once __DIR__ . '/case-statuses.php'; // status_pill_css() / status_label()
+
 $pageTitle       = $pageTitle ?? 'Kuronyx Sciences';
-$pageDescription = $pageDescription ?? 'Kuronyx Sciences — Indian veterinary compounding pharmacy.';
+$pageDescription = $pageDescription ?? 'Kuronyx Sciences - Indian veterinary compounding pharmacy.';
 $canonical       = $canonical ?? '';
 $robotsNoindex   = $robotsNoindex ?? false;
 $backHref        = $backHref ?? '/';
@@ -37,6 +39,8 @@ $backLabel       = $backLabel ?? 'Back to site';
     --mono:"JetBrains Mono",ui-monospace,"SFMono-Regular",monospace;
     --gutter:clamp(1.25rem,4vw,3rem);
     --link:#8CC3CB;
+    --warn:#e6b450;  /* a warning: something succeeded but needs a follow-up (e.g. approved, but no portal account was created) */
+    --err:#ff8787;   /* errors and destructive actions; the rgba(255,135,135,…) tints below are this colour at partial opacity */
   }
   *,*::before,*::after{ margin:0; padding:0; box-sizing:border-box; }
   html,body{ background:var(--navy); color:var(--paper); }
@@ -78,9 +82,11 @@ $backLabel       = $backLabel ?? 'Back to site';
   section.doc h2{ font-family:var(--mono); font-weight:500; font-size:0.6875rem; letter-spacing:0.22em; text-transform:uppercase; color:var(--paper); margin-bottom:1rem; display:grid; grid-template-columns:2.75rem 1fr; column-gap:1rem; align-items:baseline; padding-bottom:0.55rem; border-bottom:1px solid var(--rule); }
   section.doc h2 .n{ color:var(--teal); font-weight:400; letter-spacing:0.22em; }
   section.doc p{ font-size:0.875rem; line-height:1.65; color:var(--paper-2); margin-bottom:0.85em; text-wrap:pretty; }
+  /* Written as section.doc p.doc-kicker so it outranks section.doc p above (a bare .doc-kicker would lose). */
+  section.doc p.doc-kicker{ margin-bottom:1.5rem; }
   section.doc ul{ list-style:none; margin:0.4em 0 1.1em 0; padding:0; }
   section.doc ul li{ position:relative; padding-left:1.4rem; margin-bottom:0.55em; font-size:0.875rem; line-height:1.6; color:var(--paper-2); text-wrap:pretty; }
-  section.doc ul li::before{ content:"—"; position:absolute; left:0; top:0; color:var(--teal); font-family:var(--mono); }
+  section.doc ul li::before{ content:"-"; position:absolute; left:0; top:0; color:var(--teal); font-family:var(--mono); }
   section.doc strong{ color:var(--paper); font-weight:400; font-style:italic; }
   section.doc a{ color:var(--paper); text-decoration:none; border-bottom:1px solid var(--paper-3); transition:border-color .2s ease; }
   section.doc a:hover{ border-bottom-color:var(--teal); }
@@ -99,6 +105,18 @@ $backLabel       = $backLabel ?? 'Back to site';
   .btn-primary:disabled{ opacity:0.5; cursor:not-allowed; }
   .btn-secondary{ display:inline-flex; align-items:center; gap:0.6rem; font-family:var(--mono); font-weight:400; font-size:0.75rem; letter-spacing:0.1em; text-transform:uppercase; color:var(--paper); background:rgba(245,245,245,0.04); padding:0.85rem 1.4rem; text-decoration:none; border:1px solid var(--paper-4); cursor:pointer; transition:border-color .2s ease, background .2s ease; }
   .btn-secondary:hover{ border-color:var(--teal); background:rgba(88,149,157,0.18); }
+  /* Destructive action (Erase, Delete): red border and text, kept red on hover so it never looks like a normal button. */
+  .btn-secondary.btn-danger, .btn-secondary.btn-danger:hover{ border-color:var(--err); color:var(--err); }
+  .btn-secondary.btn-sm{ padding:0.4rem 0.8rem; font-size:0.625rem; }
+  .field-hint.spaced{ margin-bottom:1rem; }
+  .form-actions{ display:flex; gap:0.75rem; margin-top:1.5rem; }                       /* the Save / Cancel row under a form */
+  .danger-zone{ margin-top:2.5rem; padding-top:1.5rem; border-top:1px solid var(--rule); } /* a destructive action set apart below the form */
+  table.data-table a.live-link{ margin-left:0.75rem; font-family:var(--mono); font-size:0.625rem; letter-spacing:0.08em; text-transform:uppercase; white-space:nowrap; border-bottom:0; color:var(--paper-3); }
+  table.data-table a.live-link:hover{ color:var(--paper); }
+  .page-action{ margin-bottom:1.5rem; }
+  h1.doc-title + p.lead{ margin-top:1.4rem; }   /* the pages whose copy starts straight after the heading (no meta line between) */
+  .page-actions{ margin:1.75rem 0; }   /* the button row on the short landing pages (Veterinarians, Pet Parents) */
+  .end-nav{ margin-top:2.5rem; }                                                       /* the "← Back to …" button under an article / message */                                                /* a "New …" button above a list (.btn-primary is already inline-flex) */
   .field-row{ display:grid; grid-template-columns:1fr; gap:1.1rem; margin-bottom:1.1rem; }
   .field-row.two{ grid-template-columns:1fr 1fr; }
   .field-row.three{ grid-template-columns:1fr 1fr 1fr; }
@@ -113,12 +131,13 @@ $backLabel       = $backLabel ?? 'Back to site';
   .field input[type=file]{ font-family:var(--mono); font-size:0.75rem; padding-top:0.75rem; }
   .field input:focus, .field select:focus, .field textarea:focus{ border-color:var(--teal); }
   .field select option{ background:var(--navy); color:var(--paper); }
-  .field.has-error input, .field.has-error select, .field.has-error textarea{ border-color:#ff8787; }
+  .field.has-error input, .field.has-error select, .field.has-error textarea{ border-color:var(--err); }
   .field-hint{ font-size:0.75rem; color:var(--paper-4); }
+  .field-error{ font-size:0.75rem; line-height:1.5; color:var(--err); }
   .checkbox-field{ display:flex; align-items:flex-start; gap:0.75rem; margin:1.5rem 0; }
   .checkbox-field input[type=checkbox]{ margin-top:0.25rem; width:16px; height:16px; accent-color:var(--teal); flex-shrink:0; }
   .checkbox-field label{ font-size:0.8125rem; color:var(--paper-2); line-height:1.6; }
-  .checkbox-field.has-error label{ color:#ff8787; }
+  .checkbox-field.has-error label{ color:var(--err); }
   fieldset{ border:none; padding:0; margin:0 0 1.75rem 0; }
   legend{ font-family:var(--mono); font-weight:500; font-size:0.6875rem; letter-spacing:0.22em; text-transform:uppercase; color:var(--paper); margin-bottom:1.1rem; padding-bottom:0.55rem; border-bottom:1px solid var(--rule); width:100%; }
   .radio-row{ display:flex; gap:1.5rem; flex-wrap:wrap; }
@@ -126,10 +145,17 @@ $backLabel       = $backLabel ?? 'Back to site';
   .radio-field input{ accent-color:var(--teal); }
   .radio-field label{ font-size:0.875rem; color:var(--paper-2); }
   .form-status{ font-family:var(--mono); font-size:0.75rem; letter-spacing:0.06em; color:var(--paper-3); margin-top:1rem; }
-  .form-status.is-err{ color:#ff8787; }
+  .form-status.is-err{ color:var(--err); }
   .form-status.is-ok{ color:var(--teal); }
-  .alert{ border:1px solid #ff8787; background:rgba(255,135,135,0.08); color:#ffb3b3; padding:0.9rem 1.1rem; margin-bottom:1.5rem; font-size:0.8125rem; }
+  .alert{ border:1px solid var(--err); background:rgba(255,135,135,0.08); color:#ffb3b3; padding:0.9rem 1.1rem; margin-bottom:1.5rem; font-size:0.8125rem; }
   .alert-ok{ border-color:var(--teal); background:rgba(88,149,157,0.1); color:var(--paper); }
+  .alert-warn{ border-color:var(--warn); background:rgba(230,180,80,0.1); color:var(--paper); }
+  .alert-warn a{ color:var(--link); text-decoration:underline; }
+  .reattach-note{ border-left:2px solid var(--warn); background:rgba(230,180,80,0.08); padding:0.7rem 1rem; margin:0 0 1rem; font-size:0.8125rem; line-height:1.6; color:var(--paper-2); }
+  .reattach-note strong{ color:var(--paper); font-weight:500; }
+  .alert-list-heading{ margin:0.9rem 0 0.25rem; font-family:var(--mono); font-size:0.6875rem; letter-spacing:0.08em; text-transform:uppercase; }
+  .alert-list{ margin:0 0 0 1.1rem; padding:0; }
+  .alert-list li{ margin:0.2rem 0; line-height:1.5; }
   table.data-table{ width:100%; border-collapse:collapse; font-size:0.8125rem; }
   table.data-table th{ font-family:var(--mono); font-weight:500; font-size:0.625rem; letter-spacing:0.14em; text-transform:uppercase; color:var(--paper-3); text-align:left; padding:0.75rem 0.6rem; border-bottom:1px solid var(--rule); }
   table.data-table td{ padding:0.85rem 0.6rem; border-bottom:1px solid var(--rule-2); color:var(--paper-2); vertical-align:top; }
@@ -138,8 +164,7 @@ $backLabel       = $backLabel ?? 'Back to site';
   table.data-table a:hover{ color:var(--paper); border-bottom-color:var(--paper); }
   .table-scroll{ overflow-x:auto; }
   .status-pill{ display:inline-block; font-family:var(--mono); font-size:0.625rem; letter-spacing:0.08em; text-transform:uppercase; padding:0.25rem 0.6rem; border:1px solid var(--rule); color:var(--paper-2); white-space:nowrap; }
-  .status-pill.status-approved,.status-pill.status-finished{ border-color:var(--teal); color:var(--teal); }
-  .status-pill.status-closed,.status-pill.status-cancelled,.status-pill.status-rejected{ border-color:#ff8787; color:#ff8787; }
+<?= status_pill_css() /* the teal / red badge rules, generated from STATUS_TONES in case-statuses.php */ ?>
   .admin-nav{ display:flex; flex-wrap:wrap; align-items:center; gap:0.5rem; font-family:var(--mono); font-weight:400; font-size:0.6875rem; letter-spacing:0.1em; text-transform:uppercase; margin-top:1.25rem; margin-bottom:1.75rem; padding-bottom:1.25rem; border-bottom:1px solid var(--rule); }
   .admin-nav a{ color:var(--paper); text-decoration:none; padding:0.6rem 1rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); white-space:nowrap; transition:color .2s ease, border-color .2s ease, background .2s ease; }
   .admin-nav a:hover{ border-color:var(--teal); background:rgba(88,149,157,0.18); }
@@ -147,7 +172,7 @@ $backLabel       = $backLabel ?? 'Back to site';
   .admin-nav form.signout-form{ margin-left:auto; }
   .admin-nav button.signout{ font:inherit; letter-spacing:inherit; text-transform:inherit; cursor:pointer; color:var(--paper-2); padding:0.6rem 1rem; border:1px solid var(--paper-4); background:rgba(245,245,245,0.04); white-space:nowrap; transition:color .2s ease, border-color .2s ease, background .2s ease; }
   .admin-nav .signout{ color:var(--paper-2); }
-  .admin-nav .signout:hover{ color:#ff8787; border-color:#ff8787; background:rgba(255,135,135,0.1); }
+  .admin-nav .signout:hover{ color:var(--err); border-color:var(--err); background:rgba(255,135,135,0.1); }
   .admin-nav a:focus-visible, .back:focus-visible, .btn-secondary:focus-visible, table.data-table a:focus-visible{ outline:2px solid var(--teal); outline-offset:2px; }
   @media (max-width:640px){ .admin-nav{ font-size:0.625rem; } .admin-nav a{ padding:0.5rem 0.7rem; } .admin-nav form.signout-form{ margin-left:0; } .admin-nav button.signout{ padding:0.5rem 0.7rem; } }
   .filter-bar{ display:flex; gap:1rem; flex-wrap:wrap; align-items:end; margin-bottom:1.75rem; padding-bottom:1.5rem; border-bottom:1px solid var(--rule); }
@@ -158,6 +183,8 @@ $backLabel       = $backLabel ?? 'Back to site';
   @media (max-width:640px){ .kv-grid{ grid-template-columns:1fr; } }
   .kv-grid .k{ font-family:var(--mono); font-size:0.625rem; letter-spacing:0.12em; text-transform:uppercase; color:var(--paper-4); }
   .kv-grid .v{ color:var(--paper-2); margin-bottom:0.5rem; }
+  /* A registration number under its entry, in mono so it reads (and copies) as an identifier. */
+  .kv-grid .v .reg-id{ display:block; margin-top:0.2rem; font-family:var(--mono); font-size:0.75rem; letter-spacing:0.06em; color:var(--paper); }
   .note-item{ padding:0.85rem 0; border-bottom:1px solid var(--rule-2); font-size:0.8125rem; }
   .note-item .note-meta{ font-family:var(--mono); font-size:0.625rem; letter-spacing:0.08em; color:var(--paper-4); text-transform:uppercase; margin-bottom:0.35rem; }
   .note-item .note-body{ color:var(--paper-2); white-space:pre-wrap; }
@@ -177,11 +204,12 @@ $backLabel       = $backLabel ?? 'Back to site';
     <?php
     $activeNav = $activeNav ?? '';
     $navItems = [
-        'about'            => ['/about', 'About'],
-        'for-veterinarians' => ['/for-veterinarians', 'For Veterinarians'],
-        'for-cat-owners'    => ['/for-cat-owners', 'For Cat Owners'],
-        'dispatches'        => ['/dispatches', 'Dispatches'],
-        'contact-us'        => ['/contact-us', 'Contact Us'],
+        'home'              => ['/', 'Home'],
+        'about'             => ['/about/', 'About'],
+        'for-veterinarians' => ['/for-veterinarians/', 'Veterinarians'],
+        'pet-parents'       => ['/pet-parents/', 'Pet Parents'],
+        'journal'           => ['/journal/', 'Journal'],
+        'contact'           => ['/#enquiry', 'Contact'], // the Write to us form on the Home page; there is no separate contact page
     ];
     foreach ($navItems as $key => [$href, $label]):
     ?>

@@ -13,9 +13,9 @@ return function (TestEnv $env): void {
 
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
-        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['follow' => true, 
             'cookie_jar' => $jar,
-            'body' => ['csrf_token' => $csrf, 'action' => 'approve', 'note' => 'Registration verified by phone.'],
+            'body' => ['csrf_token' => $csrf, 'expected_status' => extract_expected_status($view['body']), 'action' => 'approve', 'note' => 'Registration verified by phone.'],
         ]);
         assert_contains('Application approved', $post['body']);
         assert_equal('approved', $env->pdo()->query("SELECT status FROM vet_applications WHERE id = {$id}")->fetchColumn());
@@ -41,7 +41,7 @@ return function (TestEnv $env): void {
         $env->pdo()->prepare("UPDATE vet_applications SET internal_notes = {$concat} WHERE id = ?")
             ->execute(["\n[concurrent] Someone else's note landed first.", $id]);
 
-        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+        $post = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['follow' => true, 
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'add_note', 'note' => 'This note must not erase the concurrent one above it.'],
         ]);

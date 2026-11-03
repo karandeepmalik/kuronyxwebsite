@@ -75,6 +75,8 @@ CREATE TABLE vet_applications (
     internal_notes        MEDIUMTEXT NULL,
     reviewed_by           INT UNSIGNED NULL,
     reviewed_at           DATETIME NULL,
+    -- Set when the application's personal data was erased (includes/data-protection.php); NULL = not erased.
+    erased_at             DATETIME NULL,
     created_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at            DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_vetapp_reviewer FOREIGN KEY (reviewed_by) REFERENCES staff_users(id),
@@ -91,6 +93,18 @@ CREATE TABLE vet_application_documents (
     created_at         DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_vetappdoc_app FOREIGN KEY (application_id) REFERENCES vet_applications(id) ON DELETE CASCADE,
     INDEX idx_vetappdoc_app (application_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE vet_application_consents (
+    id                     INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    application_id         INT UNSIGNED NOT NULL,
+    consent_type           VARCHAR(50) NOT NULL,
+    consent_text_version   VARCHAR(50) NOT NULL,
+    ip_address             VARCHAR(45) NULL,
+    user_agent             VARCHAR(255) NULL,
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_vetappconsent_app FOREIGN KEY (application_id) REFERENCES vet_applications(id) ON DELETE CASCADE,
+    INDEX idx_vetappconsent_app (application_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE vet_accounts (
@@ -243,8 +257,12 @@ CREATE TABLE audit_log (
     entity_id      INT UNSIGNED NULL,
     metadata_json  TEXT NULL,
     created_at     DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    -- The actor's name as of when the row was written (staff and vets only, never 'public'),
+    -- so the log still reads correctly after a rename/removal. Not in metadata_json, which
+    -- data erasure nulls out. NULL on rows written before this column existed.
+    actor_name     VARCHAR(150) NULL,
     INDEX idx_audit_entity (entity_type, entity_id),
-    INDEX idx_audit_created (created_at)
+    INDEX idx_audit_created_id (created_at, id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- Dispatches (field notes / articles), published by staff via /admin/dispatches/.
@@ -253,6 +271,8 @@ CREATE TABLE dispatches (
     title            VARCHAR(200) NOT NULL,
     slug             VARCHAR(200) NOT NULL UNIQUE,
     excerpt          VARCHAR(400) NULL,
+    issue_number     SMALLINT UNSIGNED NULL UNIQUE,   -- Journal issue (optional, each number once)
+    author           VARCHAR(255) NULL,               -- Journal byline shown under the title
     body             TEXT NOT NULL,
     status           ENUM('draft','published') NOT NULL DEFAULT 'draft',
     author_staff_id  INT UNSIGNED NULL,

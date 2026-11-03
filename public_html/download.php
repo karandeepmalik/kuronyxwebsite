@@ -23,12 +23,9 @@ $vet   = current_vet();
 // password reset — including one an attacker had stolen — stops working here too, the
 // same as it now does via require_login()/require_vet_login() elsewhere.
 if ($staff) {
-    $staffRow = db()->prepare('SELECT active, password_hash FROM staff_users WHERE id = ?');
-    $staffRow->execute([$staff['id']]);
-    $staffRow = $staffRow->fetch();
-    if (!$staffRow || (int) $staffRow['active'] !== 1 || !password_fingerprint_matches($staff, $staffRow['password_hash'])) {
-        $staff = null; // not unset from the session: it may not be the active one (see below)
-    }
+    // The same re-check as require_login() (active, password fingerprint, and the current role/name): staff_identity_now()
+    // in auth.php. null = not allowed; not unset from the session: it may not be the active one (see below).
+    $staff = staff_identity_now($staff);
 }
 if ($vet) {
     // Also re-checks the linked application's own status — see require_vet_login() in

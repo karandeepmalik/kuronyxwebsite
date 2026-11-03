@@ -75,7 +75,7 @@ return function (TestEnv $env): void {
         $post = function (array $extra) use ($env, $id, $jar) {
             $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
             $base = ['csrf_token' => extract_csrf($view['body']), 'expected_lock_version' => $env->scalar('SELECT lock_version FROM gs_requests WHERE id = ?', [$id])];
-            return http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar, 'body' => array_merge($base, $extra)]);
+            return http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['follow' => true, 'cookie_jar' => $jar, 'body' => array_merge($base, $extra)]);
         };
         $blank = ['action' => 'update_final', 'final_formulation' => '', 'final_concentration' => '', 'final_quantity' => '', 'final_price' => '', 'courier' => '', 'tracking_number' => '', 'dispatch_date' => '', 'closure_reason' => ''];
 
@@ -93,6 +93,7 @@ return function (TestEnv $env): void {
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $countBefore = (int) $env->scalar('SELECT COUNT(*) FROM case_emails WHERE gs_request_id = ?', [$id]);
         $post = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => [
                 'csrf_token' => extract_csrf($view['body']), 'ott' => extract_ott($view['body']), 'action' => 'send_email',
@@ -111,6 +112,7 @@ return function (TestEnv $env): void {
             $get = http_request('GET', $env->baseUrl . $url, ['cookie_jar' => $jar]);
             return http_request('POST', $env->baseUrl . $url, ['cookie_jar' => $jar, 'body' => array_merge(
                 ['csrf_token' => extract_csrf($get['body']), 'action' => 'save', 'slug' => '', 'excerpt' => '', 'expected_lock_version' => $id ? $env->scalar('SELECT lock_version FROM dispatches WHERE id = ?', [$id]) : 0],
+                $id ? [] : ['ott' => extract_ott($get['body'])], // creating needs the blank form's single-use token
                 $fields
             )]);
         };
@@ -147,17 +149,77 @@ return function (TestEnv $env): void {
         assert_equal(200, $r2['status']);
     });
 
-    run_test('a password longer than bcrypt\'s 72 bytes is rejected rather than silently truncated', function () use ($env) {
-        $jar = $env->cookieJarStaff;
-        $get = http_request('GET', $env->baseUrl . '/admin/staff/new.php', ['cookie_jar' => $jar]);
-        $long = str_repeat('p', 80);
-        $post = http_request('POST', $env->baseUrl . '/admin/staff/new.php', ['cookie_jar' => $jar, 'body' => [
-            'csrf_token' => extract_csrf($get['body']), 'name' => 'Long Pass', 'email' => 'longpass@example.test',
-            'role' => 'pharmacy_staff', 'password' => $long, 'password_confirm' => $long,
-        ]]);
-        assert_equal(200, $post['status']);
-        assert_contains('has-error', $post['body']);
-        assert_equal(false, $env->pdo()->query("SELECT id FROM staff_users WHERE email = 'longpass@example.test'")->fetch());
+    run_test('same-second rows page in a fixed (created_at DESC, id DESC) order: none repeated or skipped across pages (audit log, GS requests, vet applications)', function () use ($env) {
+        // created_at has 1-second resolution, so a burst of rows shares one timestamp. Without a
+        // unique tiebreaker in ORDER BY the DB may return those in any order per query, and
+        // LIMIT/OFFSET then repeats or skips rows between pages. 250 tied rows = 3 pages of 100.
+        $pdo  = $env->pdo();
+        $tie  = '2099-01-01 00:00:00'; // newer than anything else, so these rows fill pages 1-3
+        $n    = 250;
+        $size = 100;
+        $gsIds = $vetIds = [];
+        try {
+            $pdo->beginTransaction();
+            $audit = $pdo->prepare("INSERT INTO audit_log (actor_type, action, entity_type, metadata_json, created_at) VALUES ('system', 'tie_test', 'tie_test', ?, ?)");
+            $gs = $pdo->prepare(
+                "INSERT INTO gs_requests (source, owner_full_name, owner_email, owner_phone, owner_address, owner_city, owner_state, owner_pin, patient_name, requested_formulation, created_at)
+                 VALUES ('cat_owner', 'Tie Test', 'tie@example.test', '9000000000', 'x', 'x', 'x', '000000', 'Tiebreak', 'oral', ?)"
+            );
+            $vet = $pdo->prepare(
+                "INSERT INTO vet_applications (full_name, professional_email, mobile, registration_number, registration_state, qualification, year_qualified, practice_type, clinic_name, clinic_address, clinic_city, clinic_state, clinic_pin, clinic_phone, created_at)
+                 VALUES ('Tie Test', 'tie@example.test', '9000000000', 'TIE', 'x', 'BVSc', 2020, 'x', 'Tie Clinic', 'x', 'x', 'x', '000000', '9000000000', ?)"
+            );
+            for ($i = 1; $i <= $n; $i++) {
+                $audit->execute(["tie-$i", $tie]);
+                $gs->execute([$tie]);
+                $gsIds[] = (int) $pdo->lastInsertId();
+                $vet->execute([$tie]);
+                $vetIds[] = (int) $pdo->lastInsertId();
+            }
+            $pdo->commit();
+
+            $jar = $env->cookieJarStaff;
+            $cases = [
+                ['audit-log',               '#tie-(\d+)#',                                  range($n, 1)],
+                ['gs-requests',             '#/admin/gs-requests/view\.php\?id=(\d+)#',     array_reverse($gsIds)],
+                ['veterinary-applications', '#/admin/veterinary-applications/view\.php\?id=(\d+)#', array_reverse($vetIds)],
+            ];
+            foreach ($cases as [$path, $pattern, $expectedAll]) {
+                for ($p = 1; $p <= 3; $p++) {
+                    $r = http_request('GET', $env->baseUrl . "/admin/{$path}/?page={$p}", ['cookie_jar' => $jar]);
+                    assert_equal(200, $r['status']);
+                    preg_match_all($pattern, $r['body'], $m);
+                    $expected = array_slice($expectedAll, ($p - 1) * $size, $size);
+                    assert_equal($expected, array_map('intval', array_slice($m[1], 0, count($expected))), "{$path} page {$p} must hold exactly the next {$size} tied rows in id DESC order");
+                }
+            }
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $pdo->exec("DELETE FROM audit_log WHERE action = 'tie_test'");
+            if ($gsIds)  $pdo->exec('DELETE FROM gs_requests WHERE id IN (' . implode(',', $gsIds) . ')');
+            if ($vetIds) $pdo->exec('DELETE FROM vet_applications WHERE id IN (' . implode(',', $vetIds) . ')');
+        }
+    });
+
+    // Status text comes from a DB enum, so it can't hold markup today - but every other value on these
+    // pages is escaped, so the pill text must be too (the class half already was).
+    run_test('every status pill escapes its visible text, not just its CSS class', function () use ($env) {
+        $offenders = [];
+        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($env->root . '/public_html', FilesystemIterator::SKIP_DOTS));
+        $seen = 0;
+        foreach ($it as $file) {
+            if ($file->getExtension() !== 'php') continue;
+            foreach (file($file->getPathname()) as $i => $line) {
+                if (strpos($line, 'class="status-pill status-<?=') === false) continue;
+                $seen++;
+                // The text half: everything between the closing quote of class="..." and </span>.
+                if (!preg_match('#"><\?= htmlspecialchars\(.+, ENT_QUOTES\) \?></span>#', $line)) {
+                    $offenders[] = str_replace($env->root . DIRECTORY_SEPARATOR, '', $file->getPathname()) . ':' . ($i + 1);
+                }
+            }
+        }
+        assert_true($seen >= 7, "expected to find the status pills (found {$seen})");
+        assert_equal([], $offenders, "these status pills print their text unescaped:\n  - " . implode("\n  - ", $offenders));
     });
 
     run_test('a send that fails validation keeps the drafted email instead of wiping it', function () use ($env) {
@@ -165,6 +227,7 @@ return function (TestEnv $env): void {
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $r = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => [
                 'csrf_token' => extract_csrf($view['body']), 'ott' => extract_ott($view['body']), 'action' => 'send_email',
@@ -183,11 +246,13 @@ return function (TestEnv $env): void {
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $csrf = extract_csrf($view['body']);
         $r = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar, 'body' => ['csrf_token' => $csrf, 'action' => 'add_note', 'content' => str_repeat('a', 10001)],
         ]);
         assert_equal(200, $r['status']);
         assert_contains('note is too long', $r['body']);
         $r = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", [
+            'follow' => true,
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => $csrf, 'action' => 'change_status', 'new_status' => 'under_review', 'status_note' => str_repeat('a', 10001), 'expected_lock_version' => 0],
         ]);
@@ -202,9 +267,9 @@ return function (TestEnv $env): void {
         $view = http_request('GET', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar]);
         $body = ['csrf_token' => extract_csrf($view['body']), 'ott' => extract_ott($view['body']), 'action' => 'no_email_needed'];
         $before = $count();
-        $first = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar, 'body' => $body]);
+        $first = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['follow' => true, 'cookie_jar' => $jar, 'body' => $body]);
         assert_contains('Noted', $first['body']);
-        $second = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['cookie_jar' => $jar, 'body' => $body]);
+        $second = http_request('POST', $env->baseUrl . "/admin/gs-requests/view.php?id={$id}", ['follow' => true, 'cookie_jar' => $jar, 'body' => $body]);
         assert_contains('already submitted', $second['body']);
         assert_equal($before + 1, $count());
     });

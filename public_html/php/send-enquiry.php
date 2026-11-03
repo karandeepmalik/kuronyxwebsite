@@ -119,6 +119,6 @@ if ($httpCode === 201) {
     echo json_encode(['success' => true]);
 } else {
     http_response_code(500);
-    error_log('[send-enquiry] Brevo send failed (HTTP ' . $httpCode . '): ' . $response);
+    error_log('[send-enquiry] Brevo send failed (HTTP ' . $httpCode . '): ' . log_safe((string) $response));
     echo json_encode(['success' => false, 'message' => 'Enquiry could not be transmitted.']);
 }

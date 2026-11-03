@@ -58,6 +58,69 @@ return function (TestEnv $env): void {
         assert_equal(302, $ok['status'], 'a clean object stream must be accepted');
     });
 
+    run_test('a PDF we could not read is NOT called encrypted: only a really encrypted one is, the others get an honest "could not check" message (a Karandeep review comment)', function () use ($env, $submitCatOwner) {
+        $say = function (string $label, string $bytes) use ($env, $submitCatOwner): string {
+            $f = $env->tmpDir . "/verdict-{$label}.pdf";
+            file_put_contents($f, $bytes);
+            $r = $submitCatOwner("verdict{$label}", $f, 'rx.pdf', 'application/pdf');
+            assert_equal(200, $r['status'], "{$label} is refused");
+            assert_equal(0, (int) $env->scalar("SELECT COUNT(*) FROM gs_requests WHERE owner_email = 'followup-verdict{$label}@example.test'"), "{$label} created a case");
+            return htmlspecialchars_decode($r['body'], ENT_QUOTES);
+        };
+        // Really encrypted: says so.
+        $enc = $say('encrypted', "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n<< /Root 1 0 R /Encrypt 9 0 R >>\n%%EOF\n");
+        assert_contains('This PDF is encrypted', $enc);
+        // An object stream whose compression cannot be decoded (a format we do not read): not encrypted.
+        $unreadable = $say('unreadable', "%PDF-1.5\n7 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode >>\nstream\nthis is not zlib data at all\nendstream\nendobj\n%%EOF\n");
+        foreach (['unreadable' => $unreadable] as $what => $page) {
+            assert_contains("We couldn't check this PDF automatically", $page, "{$what}: the honest message");
+            assert_contains('photo or scan of the document', $page, "{$what}: says what to do");
+            assert_true(strpos($page, 'is encrypted') === false, "{$what}: must NOT be called encrypted");
+        }
+        assert_true(strpos($enc, "couldn't check this PDF automatically") === false, 'and an encrypted one is not given the vague message');
+    });
+    run_test('the PDF zip-bomb guard really caps unpacking: a stream of 1 GB unpacked is refused quickly with the honest message (not a crash), a truncated stream too, and a big but harmless one is accepted', function () use ($env, $submitCatOwner) {
+        // A compressed stream of zeros, built piece by piece so the test never holds the unpacked size in memory.
+        $zeros = function (int $megabytes): string {
+            $d = deflate_init(ZLIB_ENCODING_DEFLATE);
+            $one = str_repeat('0', 1048576);
+            $out = '';
+            for ($i = 0; $i < $megabytes; $i++) $out .= deflate_add($d, $one, ZLIB_NO_FLUSH);
+            return $out . deflate_add($d, '', ZLIB_FINISH);
+        };
+        $pdfWith = fn (string $stream): string => "%PDF-1.5\n7 0 obj\n<< /Type /ObjStm /N 1 /First 4 /Filter /FlateDecode >>\nstream\n{$stream}\nendstream\nendobj\n%%EOF\n";
+        $try = function (string $label, string $bytes) use ($env, $submitCatOwner): array {
+            $file = $env->tmpDir . "/inflate-{$label}.pdf";
+            file_put_contents($file, $bytes);
+            $started = microtime(true);
+            $r = $submitCatOwner("inflate{$label}", $file, 'rx.pdf', 'application/pdf');
+            return [$r, microtime(true) - $started];
+        };
+
+        // 1 GB when unpacked, about 1 MB on the wire: PHP's own max-length argument let this through to memory_limit.
+        [$r, $seconds] = $try('bomb', $pdfWith($zeros(1000)));
+        assert_equal(200, $r['status'], 'a bomb is refused on the page, not a 500 from running out of memory');
+        $page = htmlspecialchars_decode($r['body'], ENT_QUOTES);
+        assert_contains("We couldn't check this PDF automatically", $page);
+        assert_true(strpos($page, 'is encrypted') === false);
+        assert_equal(0, (int) $env->scalar("SELECT COUNT(*) FROM gs_requests WHERE owner_email = 'followup-inflatebomb@example.test'"));
+        assert_true($seconds < 20, 'and quickly (' . round($seconds, 1) . ' s)');
+
+        // Just over the 32 MB we are willing to inspect: also refused (this used to be accepted).
+        [$r] = $try('over', $pdfWith($zeros(33)));
+        assert_equal(200, $r['status']);
+        assert_contains("We couldn't check this PDF automatically", htmlspecialchars_decode($r['body'], ENT_QUOTES));
+
+        // A stream cut off before its end cannot be read.
+        $cut = substr($zeros(1), 0, 40);
+        [$r] = $try('cut', $pdfWith($cut));
+        assert_equal(200, $r['status']);
+        assert_contains("We couldn't check this PDF automatically", htmlspecialchars_decode($r['body'], ENT_QUOTES));
+
+        // 5 MB of harmless data unpacked is fine.
+        [$r] = $try('fine', $pdfWith($zeros(5)));
+        assert_equal(302, $r['status'], 'a big but harmless object stream is accepted');
+    });
     run_test('login treats accent/malformed email variants as one lockout bucket', function () use ($env) {
         $env->pdo()->exec("DELETE FROM login_attempts");
         $env->pdo()->exec("DELETE FROM rate_limit_hits WHERE bucket LIKE 'login_ip:%'");
@@ -91,7 +154,7 @@ return function (TestEnv $env): void {
         $id = (int) $pdo->lastInsertId();
         $jar = $env->cookieJarStaff;
         $view = http_request('GET', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['cookie_jar' => $jar]);
-        $r = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", [
+        $r = http_request('POST', $env->baseUrl . "/admin/veterinary-applications/view.php?id={$id}", ['follow' => true, 
             'cookie_jar' => $jar,
             'body' => ['csrf_token' => extract_csrf($view['body']), 'ott' => extract_ott($view['body']), 'action' => 'send_email',
                 'sender' => 'ops@kuronyx.in', 'recipient' => 'frontdesk@example.test', 'subject' => 'Activate',
@@ -118,6 +181,53 @@ return function (TestEnv $env): void {
         $row = $env->pdo()->query("SELECT actor_type, actor_id FROM audit_log WHERE action = 'vet_login' ORDER BY id DESC LIMIT 1")->fetch();
         assert_equal('vet', $row['actor_type']);
         assert_equal($accountId, (int) $row['actor_id']);
+    });
+
+    run_test('audit rows carry the actor\'s name for staff and vets, never for public visitors, and the log page falls back sensibly', function () use ($env) {
+        $pdo = $env->pdo();
+
+        // Written by audit() itself: the vet's login row has the vet's name (from their application).
+        $vetRow = $pdo->query("SELECT a.actor_id, a.actor_name, app.full_name FROM audit_log a JOIN vet_accounts va ON va.id = a.actor_id JOIN vet_applications app ON app.id = va.vet_application_id WHERE a.action = 'vet_login' ORDER BY a.id DESC LIMIT 1")->fetch();
+        assert_true($vetRow !== false && $vetRow['full_name'] !== '');
+        assert_equal($vetRow['full_name'], $vetRow['actor_name']);
+
+        // ... and a staff row has the staff member's name.
+        $staffRow = $pdo->query("SELECT a.actor_name, s.name FROM audit_log a JOIN staff_users s ON s.id = a.actor_id WHERE a.actor_type = 'staff' ORDER BY a.id DESC LIMIT 1")->fetch();
+        assert_true($staffRow !== false && $staffRow['name'] !== '');
+        assert_equal($staffRow['name'], $staffRow['actor_name']);
+
+        // A 'public' actor is an anonymous visitor (for an intake form, the pet owner / applicant) -
+        // their name must never be copied onto the row, where data erasure wouldn't clear it.
+        assert_equal(0, (int) $env->scalar("SELECT COUNT(*) FROM audit_log WHERE actor_type = 'public' AND actor_name IS NOT NULL"));
+
+        // What the page shows. Old-style rows (no actor_name) fall back to the current name, then to
+        // "Vet #id"; a stored name wins over the account's current one.
+        $staffId = (int) $env->scalar("SELECT id FROM staff_users WHERE email = 'admin@example.test'");
+        $vetId   = (int) $env->scalar('SELECT id FROM vet_accounts ORDER BY id LIMIT 1');
+        $vetName = $env->scalar('SELECT app.full_name FROM vet_accounts va JOIN vet_applications app ON app.id = va.vet_application_id WHERE va.id = ?', [$vetId]);
+        $staffName = $env->scalar('SELECT name FROM staff_users WHERE id = ?', [$staffId]);
+        $ins = $pdo->prepare("INSERT INTO audit_log (actor_type, actor_id, actor_name, action, entity_type, created_at) VALUES (?, ?, ?, ?, 'actor_test', '2099-01-01 00:00:00')");
+        try {
+            $ins->execute(['staff', $staffId, null, 'actor_test_legacy_staff']);
+            $ins->execute(['vet', $vetId, null, 'actor_test_legacy_vet']);
+            $ins->execute(['vet', 999999, null, 'actor_test_missing_vet']);
+            $ins->execute(['staff', $staffId, 'Name At The Time', 'actor_test_snapshot']);
+            $ins->execute(['public', null, null, 'actor_test_public']);
+
+            $page = http_request('GET', $env->baseUrl . '/admin/audit-log/', ['cookie_jar' => $env->cookieJarStaff]);
+            assert_equal(200, $page['status']);
+            $actorOf = function (string $action) use ($page) {
+                assert_true((bool) preg_match('#<td>([^<]*)</td>\s*<td>' . preg_quote($action, '#') . '</td>#', $page['body'], $m), "no row for {$action}");
+                return html_entity_decode($m[1], ENT_QUOTES);
+            };
+            assert_equal($staffName, $actorOf('actor_test_legacy_staff'));
+            assert_equal($vetName, $actorOf('actor_test_legacy_vet'));
+            assert_equal('Vet #999999', $actorOf('actor_test_missing_vet'));
+            assert_equal('Name At The Time', $actorOf('actor_test_snapshot'));
+            assert_equal('Public', $actorOf('actor_test_public'));
+        } finally {
+            $pdo->exec("DELETE FROM audit_log WHERE entity_type = 'actor_test'");
+        }
     });
 
     run_test('forgot-password does the same kind of work for an unknown address as for a real one (no bcrypt only on one side)', function () use ($env) {
