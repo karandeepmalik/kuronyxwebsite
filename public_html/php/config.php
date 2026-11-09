@@ -1,9 +1,12 @@
 <?php
-// Keep this file private — never commit to git or make publicly accessible
-define('BREVO_API_KEY', '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');  // ← paste your full key here
-define('BREVO_TEMPLATE_ID', 1);
-define('BREVO_ENQUIRY_TEMPLATE_ID', 3);
-define('BREVO_LIST_ID', 7); // Default list ID for newsletter subscriptions
-define('SENDER_EMAIL', 'hello@kuronyx.in');
-define('RECEIVER_EMAIL', 'ops@kuronyx.in');
-define('SENDER_NAME', 'Kuronyx Sciences');
+// Brevo secrets and settings live in db-config.php, preferably one level above public_html
+// (see includes/config-loader.php and includes/db-config.sample.php). This file exists only
+// so send-welcome.php / send-enquiry.php's `require_once 'config.php'` keeps working unchanged.
+require_once __DIR__ . '/../includes/config-loader.php';
+$__configPath = gs_config_path();
+if ($__configPath === null) {
+    http_response_code(503);
+    exit('Site is not yet configured. Please try again shortly.');
+}
+require_once $__configPath;
+unset($__configPath);

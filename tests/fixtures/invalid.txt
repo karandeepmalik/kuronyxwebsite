@@ -1,0 +1,1 @@
+This is a plain-text file, not a PDF/JPG/PNG — used to make store_uploaded_file() reject it on mime-type, for testing orphaned-upload cleanup.

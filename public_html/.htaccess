@@ -1,0 +1,57 @@
+Options -Indexes
+
+# Force HTTPS. Hostinger (like most shared hosts) may front the app with a proxy/CDN that
+# terminates TLS itself, in which case %{HTTPS} never shows "on" even on a genuinely secure
+# connection — X-Forwarded-Proto is the standard header such a proxy sets to carry the
+# original scheme, so both are checked.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+
+    # One canonical host: www.kuronyx.in is a separate hostname that Hostinger serves with the
+    # same content (checked live 2026-10-05: https://www.kuronyx.in/ returned 200, no
+    # redirect), so without this every page exists at two addresses. Sends www to the bare
+    # domain with https in a single hop (this rule is first, so http://www.… doesn't take two
+    # redirects), keeping the path and query string. The canonical tags and sitemap all use
+    # https://kuronyx.in/.
+    RewriteCond %{HTTP_HOST} ^www\.kuronyx\.in$ [NC]
+    RewriteRule ^ https://kuronyx.in%{REQUEST_URI} [L,R=301]
+
+    RewriteCond %{HTTPS} !=on
+    RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+    RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [L,R=301]
+
+    # Moved pages. Each old address ALSO has a small PHP file that sends the same redirect (dispatches/index.php,
+    # dispatches/view.php, contact-us/index.php), so a link still lands in the right place if these rules are not applied
+    # on the host. Dispatches is now the Journal (an article keeps its slug); there is no separate contact page any more,
+    # Contact is the Write to us form on the Home page (NE: do not escape the # in the target).
+    RewriteRule ^dispatches/?$ /journal/ [R=301,L]
+    RewriteRule ^dispatches/index\.php$ /journal/ [R=301,L]
+    RewriteRule ^dispatches/view\.php$ /journal/view.php [R=301,L,QSA]
+    RewriteRule ^contact-us/?$ /#enquiry [R=301,L,NE]
+    RewriteRule ^contact-us/index\.php$ /#enquiry [R=301,L,NE]
+    # The Privacy Policy has a clean address now. The old file is kept (the consent version is a fingerprint of it and the
+    # new page serves it), so this rule is the only layer: without it the old address simply keeps working.
+    RewriteRule ^Privacy\ Policy\.html$ /privacy-policy/ [R=301,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    # Clickjacking: nothing in this app is meant to be framed, by itself or anyone else —
+    # without this, admin pages (Approve, Deactivate, Send Email, etc.) could be loaded
+    # inside an invisible frame on an attacker's page and clicked through.
+    Header always set X-Frame-Options "DENY"
+    Header always set Content-Security-Policy "frame-ancestors 'none'"
+    # Prevents a staff member clicking an outbound link from an admin page (e.g. in a
+    # document, or a case's own notes) from leaking the full admin URL — including a
+    # password-reset or setup token that happens to be in the query string — to that
+    # external site via the Referer header.
+    Header always set Referrer-Policy "strict-origin-when-cross-origin"
+    # HSTS: tells the browser to only ever connect over HTTPS from here on, closing the
+    # window where a user who types "kuronyx.in" (no scheme) gets a plain-HTTP response
+    # before the redirect above even has a chance to run. Starts at a short max-age — once
+    # HTTPS has been confirmed solid in production for a while, raise this (a common next
+    # step is 15768000 / 6 months, then 31536000 / 1 year with includeSubDomains) — a long
+    # max-age shipped before that confirmation risks the site becoming unreachable over
+    # plain HTTP if TLS ever breaks, for as long as that duration, for anyone who already
+    # has it cached.
+    Header always set Strict-Transport-Security "max-age=3600"
+</IfModule>

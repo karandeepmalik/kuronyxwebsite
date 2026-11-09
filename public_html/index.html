@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Kuronyx Sciences — FIP &amp; GS-441524 Veterinary Compounding</title>
-<meta name="description" content="Kuronyx Sciences is an Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats — made to prescription under Schedule N.">
+<title>Kuronyx Sciences | Veterinary Compounding Pharmacy, Mumbai, India</title>
+<meta name="description" content="Kuronyx Sciences is a prescription-only veterinary compounding pharmacy in Mumbai, India. Compounded medicine for animals, prepared against verified veterinary prescriptions, including for feline infectious peritonitis (FIP).">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,200;8..60,300;8..60,400&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
@@ -13,37 +13,37 @@
 <!-- ---------- OPEN GRAPH (link previews on LinkedIn/WhatsApp/etc.) ---------- -->
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Kuronyx Sciences">
-<meta property="og:title" content="Kuronyx Sciences — FIP &amp; GS-441524 Veterinary Compounding">
-<meta property="og:description" content="Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats, made to prescription under Schedule N.">
+<meta property="og:title" content="Kuronyx Sciences | Veterinary Compounding Pharmacy, Mumbai, India">
+<meta property="og:description" content="Prescription-only veterinary compounding pharmacy in Mumbai, India. Compounded medicine prepared against verified veterinary prescriptions.">
 <meta property="og:url" content="https://kuronyx.in/">
-<meta property="og:image" content="https://kuronyx.in/assets/logoNoBG.jpg"><!-- 1200x630 recommended -->
+<meta property="og:image" content="https://kuronyx.in/assets/logoNoBG.png"><!-- 1200x630 recommended -->
 
 <!-- ---------- TWITTER / X CARD ---------- -->
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Kuronyx Sciences — FIP &amp; GS-441524 Veterinary Compounding">
-<meta name="twitter:description" content="Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats.">
-<meta name="twitter:image" content="https://kuronyx.in/assets/logoNoBG.jpg">
+<meta name="twitter:title" content="Kuronyx Sciences | Veterinary Compounding Pharmacy, Mumbai, India">
+<meta name="twitter:description" content="Prescription-only veterinary compounding pharmacy in Mumbai, India.">
+<meta name="twitter:image" content="https://kuronyx.in/assets/logoNoBG.png">
 
 <script type="application/ld+json">
 {
   "@context": "https://schema.org",
   "@type": "Pharmacy",
+  "@id": "https://kuronyx.in/#organization",
   "name": "Kuronyx Sciences",
+  "legalName": "Kuronyx Sciences Pvt. Ltd.",
   "alternateName": "Kuronyx",
   "url": "https://kuronyx.in/",
-  "logo": "https://kuronyx.in/assets/logoNoBG.jpg",
-  "image": "https://kuronyx.in/assets/logoNoBG.jpg",
-  "description": "Indian veterinary compounding pharmacy producing GS-441524 formulations for FIP treatment in cats, made to prescription under Schedule N.",
+  "logo": "https://kuronyx.in/assets/logoNoBG.png",
+  "image": "https://kuronyx.in/assets/logoNoBG.png",
+  "description": "Prescription-only veterinary compounding pharmacy in Mumbai, India, preparing compounded medicine against verified veterinary prescriptions.",
   "email": "ops@kuronyx.in",
   "telephone": "+917083515424",
-  "priceRange": "₹₹",
   "areaServed": {
     "@type": "Country",
     "name": "India"
   },
   "knowsAbout": [
     "Feline Infectious Peritonitis (FIP)",
-    "GS-441524",
     "Veterinary compounding",
     "Schedule N compounding",
     "Cascade prescribing"
@@ -59,13 +59,18 @@
   "identifier": [
     { "@type": "PropertyValue", "propertyID": "DPIIT",       "value": "DIPP222076" },
     { "@type": "PropertyValue", "propertyID": "Udyam (MSME)", "value": "UDYAM-MH-19-0379978" },
-    { "@type": "PropertyValue", "propertyID": "IEC",         "value": "AAMCK1631J" }
+    { "@type": "PropertyValue", "propertyID": "IEC",         "value": "AAMCK1631J" },
+    { "@type": "PropertyValue", "propertyID": "CIN",         "value": "U21000MH2025PTC456216" }
   ],
   "hasCredential": {
     "@type": "EducationalOccupationalCredential",
     "credentialCategory": "certification",
     "name": "ISO Certification",
-    "identifier": "3050250922125Q"
+    "identifier": "3050250922125Q",
+    "recognizedBy": {
+      "@type": "Organization",
+      "name": "Quality Research Organization (QRO)"
+    }
   },
   "sameAs": [
     "https://www.linkedin.com/company/kuronyx-sciences/"
@@ -137,7 +142,7 @@
   /* ——————————————————————————— top chrome ——————————————————————————— */
   header.chrome{
     position:fixed; inset:0 0 auto 0;
-    display:grid; grid-template-columns: 1fr 1fr 1fr;
+    display:grid; grid-template-columns: auto 1fr auto; /* the nav (six items and the clock) takes the width it needs instead of a fixed third */
     align-items:center;
     padding: 1.4rem var(--gutter);
     z-index:50;
@@ -148,9 +153,10 @@
   }
   @media (max-width:720px){
     header.chrome{
-      grid-template-columns: 1fr auto;
+      grid-template-columns: auto minmax(0, 1fr); /* the logo keeps its width; the six nav items wrap in what is left */
       padding: 1rem var(--gutter);
     }
+    header.chrome .meta.site-nav{ justify-content:flex-end; column-gap:0.75rem; }
     header.chrome .center-readout{ display:none; }
     header.chrome .meta .sep, header.chrome .meta #clock{ display:none; }
     header.chrome .meta{ font-size: 0.6rem; }
@@ -230,6 +236,9 @@
     white-space:nowrap;
   }
   .chrome .meta .sep{ color:var(--paper-4); }
+  .chrome .meta.site-nav{ flex-wrap:wrap; row-gap:0.4rem; }
+  .chrome .meta.site-nav a{ color:var(--paper-2); text-decoration:none; border-bottom:1px solid var(--paper-4); padding-bottom:1px; transition:color .25s ease,border-color .25s ease; }
+  .chrome .meta.site-nav a:hover{ color:var(--teal); border-bottom-color:var(--teal); }
 
   /* ——— left telemetry rail ——— */
   .rail{
@@ -667,6 +676,22 @@
   .enquiry button[disabled]{ opacity: .5; cursor: default; transform: none; box-shadow: none; }
   .enquiry button svg{ width: 14px; height: 14px; }
 
+  /* Says what the message is used for, right above the button (vets paste patient and owner details into it). */
+  .enquiry .privacy-note{
+    margin: 0.3rem 0 0.5rem;
+    font-family: var(--serif); font-weight: 300;
+    font-size: 0.875rem; line-height: 1.5;
+    color: var(--paper-2);
+  }
+  .enquiry .privacy-note a{
+    color: var(--paper);
+    text-decoration: none;
+    border-bottom: 1px solid var(--teal);
+    padding-bottom: 1px;
+    transition: border-color .25s ease;
+  }
+  .enquiry .privacy-note a:hover{ border-bottom-color: var(--paper); }
+
   .enquiry .meta-row{
     margin-top: 0.9rem;
     display: flex; justify-content: center; align-items: baseline;
@@ -809,18 +834,23 @@
 <span class="frame-tick br" aria-hidden="true"></span>
 
 <header class="chrome" role="banner">
-  <a class="wordmark" href="#hero" aria-label="Kuronyx — home">
+  <a class="wordmark" href="#hero" aria-label="Kuronyx - home">
     <img src="assets/logoNoBG.png" alt="Kuronyx Logo" class="logo">
 </a>
   <span class="center-readout" id="centerReadout" aria-hidden="true">
     <span class="dot"></span>
     <span id="centerLabel">SYS · IDLE</span>
   </span>
-  <span class="meta">
-    <span id="clock">—</span>
+  <nav class="meta site-nav" aria-label="Primary">
+    <a href="#hero">Home</a>
+    <a href="/about/">About</a>
+    <a href="/for-veterinarians/">Veterinarians</a>
+    <a href="/pet-parents/">Pet Parents</a>
+    <a href="/journal/">Journal</a>
+    <a href="#enquiry">Contact</a>
     <span class="sep">·</span>
-    <span style="white-space:nowrap;">IST · 19.127733°N 72.834761°E</span>
-  </span>
+    <span id="clock">-</span>
+  </nav>
 </header>
 
 <nav class="rail" aria-label="Section navigation">
@@ -854,7 +884,7 @@
     <div class="hero-foot">
       <span class="reveal" style="--rd:600ms">
         <span class="lh-label">Operator</span>
-        <span class="lh-name">Kuronyx Speciality Pharmacy</span>
+        <span class="lh-name">Kuronyx Sciences</span>
       </span>
       <span></span>
       <span class="scroll-cue reveal" style="--rd:800ms">Continue</span>
@@ -873,7 +903,7 @@
           Some gaps are so familiar they stop looking like gaps.
         </p>
         <p class="reveal" style="--rd:240ms">
-          Kuronyx Speciality Pharmacy exists in that space — India's first
+          Kuronyx Sciences exists in that space - India's first
           veterinary-only compounding and import pharmacy, prescription-only,
           built for the vets and the animals that clinical infrastructure forgot.
         </p>
@@ -891,7 +921,7 @@
       <div class="body">
         <p class="lede reveal" style="--rd:80ms">
           In India, a cat can be diagnosed with a treatable disease and still die
-          — not because medicine doesn't exist, but because the right medicine,
+          - not because medicine doesn't exist, but because the right medicine,
           at the right concentration, for the right species, does not exist here
           in any regulated form.
         </p>
@@ -911,7 +941,7 @@
         <span class="ref">On record</span>
       </div>
       <div class="body" style="max-width:48rem;">
-        <p class="h-eyebrow reveal">Filed credentials &nbsp;·&nbsp; Govt. of India</p>
+        <p class="h-eyebrow reveal">Registrations &amp; certifications</p>
         <ul class="credentials">
           <li class="reveal" style="--rd:60ms">
             <span class="ref">001</span>
@@ -922,7 +952,7 @@
           <li class="reveal" style="--rd:140ms">
             <span class="ref">002</span>
             <span class="key">Recognition</span>
-            <span class="val">DPIIT — Healthcare &amp; Life Sciences</span>
+            <span class="val">DPIIT - Healthcare &amp; Life Sciences</span>
             <span class="num">DPIIT/IND</span>
           </li>
           <li class="reveal" style="--rd:220ms">
@@ -940,7 +970,7 @@
           <li class="reveal" style="--rd:380ms">
             <span class="ref">005</span>
             <span class="key">Incorporation</span>
-            <span class="val">Kuronyx Sciences Private Limited</span>
+            <span class="val">Kuronyx Sciences Pvt. Ltd.</span>
             <span class="num">Sep 2025 · Mumbai</span>
           </li>
         </ul>
@@ -957,7 +987,7 @@
       </div>
       <div class="body" style="max-width:42rem;">
         <p class="lede reveal" style="--rd:60ms">
-          Kuronyx Speciality Pharmacy is a prescription-only dispensary.
+          Kuronyx Sciences is a prescription-only dispensary.
           We do not sell to the public.
         </p>
         <p class="reveal" style="--rd:220ms">
@@ -966,7 +996,7 @@
         </p>
         <p class="reveal" style="--rd:380ms">
           If you are a veterinarian and you have a patient who needs what we make
-          — write to us.
+          - write to us.
         </p>
 
         <a class="mailto reveal" style="--rd:560ms"
@@ -984,31 +1014,27 @@
   </section>
 
   <!-- 06 -->
-  <section id="dispatches" data-screen-label="06 Dispatches" data-id="06" data-name="Dispatches">
+  <section id="dispatches" data-screen-label="06 Journal" data-id="06" data-name="Journal">
     <div class="grid">
       <div class="index-block reveal">
         <span class="num">06</span>
-        <span class="ref">Dispatches</span>
+        <span class="ref">Journal</span>
       </div>
       <div class="body" style="max-width:42rem;">
-        <p class="dispatch-eyebrow reveal">Field notes</p>
+        <p class="dispatch-eyebrow reveal">Clinical education</p>
         <p class="lede reveal" style="--rd:80ms">
-          Occasional dispatches from the formulary — new compounds, regulatory
-          notes, case reports from the field.
+          A clinical education series for veterinarians.
+          New issues arrive monthly.
         </p>
         <p class="reveal" style="--rd:240ms">
           No marketing. Unsubscribe in one click.
         </p>
 
-        <form class="subscribe reveal" style="--rd:400ms" id="subscribeForm"
-              name="newsletter"
+        <form class="subscribe reveal" style="--rd:400ms" id="subscribeForm" data-captcha
               method="POST"
-              data-netlify="true"
-              netlify-honeypot="bot-field"
               novalidate>
-          <input type="hidden" name="form-name" value="newsletter" />
           <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
-          <div class="heading">Field dispatches · subscribe</div>
+          <div class="heading">Journal · subscribe</div>
           <div class="input-group">
             <svg class="input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect x="3" y="5" width="18" height="14" rx="1"/>
@@ -1052,13 +1078,9 @@
           For veterinarians with a patient query or a prescription enquiry.
         </p>
 
-        <form class="enquiry reveal" style="--rd:240ms" id="enquiryForm"
-              name="enquiry"
+        <form class="enquiry reveal" style="--rd:240ms" id="enquiryForm" data-captcha
               method="POST"
-              data-netlify="true"
-              netlify-honeypot="bot-field"
               novalidate>
-          <input type="hidden" name="form-name" value="enquiry" />
           <p class="hp" hidden><label>Don't fill this out: <input name="bot-field" /></label></p>
 
           <div class="field-row two">
@@ -1094,6 +1116,8 @@
             <textarea name="message" id="enq-message" rows="4" required></textarea>
           </label>
 
+          <p class="privacy-note">We'll use this only to reply to you. See our <a href="/privacy-policy/">Privacy Policy</a>.</p>
+
           <button type="submit" id="enquiryBtn">
             <span class="label">Write to us</span>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -1112,7 +1136,7 @@
 
 <footer class="foot">
   <span class="legal">© 2026 Kuronyx Sciences Pvt. Ltd.</span>
-  <span class="domain"><a href="./Privacy%20Policy.html" class="foot-link">Privacy Policy</a> · kuronyx.in</span>
+  <span class="domain"><a href="/privacy-policy/" class="foot-link">Privacy Policy</a> · kuronyx.in</span>
   <span class="place">Mumbai · India · IST</span>
 </footer>
 
@@ -1182,7 +1206,7 @@
   window.addEventListener('resize', onScroll);
   onScroll();
 
-  // ——— enquiry form (Netlify submit + UI feedback)
+  // ——— enquiry form (UI feedback + submit to /php/send-enquiry.php)
   const enqForm   = document.getElementById('enquiryForm');
   const enqBtn    = document.getElementById('enquiryBtn');
   const enqStatus = document.getElementById('enquiryStatus');
@@ -1203,6 +1227,14 @@
       enqForm.classList.remove('is-err','is-ok');
       enqForm.querySelectorAll('.field').forEach(f => f.classList.remove('has-error'));
 
+      // Numbers pasted from WhatsApp or a contact card often hold non-breaking spaces: the browser's \s accepts them but
+      // the server's does not (plain ASCII), so turn every kind of space into an ordinary one before checking and sending.
+      const phoneField = enqForm.querySelector('[name="phone"]');
+      if (phoneField) phoneField.value = phoneField.value.replace(/\s+/g, ' ').trim();
+      const phoneProblem = (v) => /[^0-9+()\-\s.]/.test(v)
+        ? 'Phone number: use digits only (spaces and + ( ) - . are fine)'
+        : v.length < 5 ? 'Phone number looks too short' : 'Phone number is too long (30 characters at most)';
+
       // simple validation
       let firstInvalid = null;
       ['name','clinic','city','email','phone','message'].forEach(n => {
@@ -1211,6 +1243,8 @@
         const v = (f.value || '').trim();
         let bad = !v;
         if (!bad && n === 'email') bad = !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+        // Same rule as send-enquiry.php, so a phone it would refuse is caught here (e.g. "ext 5").
+        if (!bad && n === 'phone') bad = !/^[0-9+()\-\s.]{5,30}$/.test(v);
         if (bad){
           f.closest('.field')?.classList.add('has-error');
           if (!firstInvalid) firstInvalid = f;
@@ -1218,8 +1252,17 @@
       });
       if (firstInvalid){
         enqForm.classList.add('is-err');
-        enqStatus.textContent = 'Please complete required fields';
+        enqStatus.textContent = firstInvalid.name === 'phone' && firstInvalid.value
+          ? phoneProblem(firstInvalid.value)
+          : 'Please complete required fields';
         firstInvalid.focus();
+        return;
+      }
+
+      // The verification check could not load (or is still loading): say so, do not send a request that is bound to be refused.
+      if (window.KuronyxCaptcha && KuronyxCaptcha.blocked){
+        enqForm.classList.add('is-err');
+        enqStatus.textContent = KuronyxCaptcha.blocked;
         return;
       }
 
@@ -1229,30 +1272,18 @@
         const formData = new FormData(enqForm);
         const payload = {};
         formData.forEach((v, k) => {
-          if (k !== 'bot-field' && k !== 'form-name') {
-            payload[k] = v;
-          }
+          payload[k] = v;
         });
-        
-        // Background backup submission to Netlify
-        try {
-          const body = new URLSearchParams();
-          formData.forEach((v, k) => body.append(k, v));
-          fetch('/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: body.toString()
-          });
-        } catch (e) {}
 
-        const res = await fetch('/php/send-enquiry.php', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        
-        const resData = await res.json();
-        if (!res.ok || !resData.success) throw new Error(resData.message || 'Transmission failed');
+        if (window.KuronyxCaptcha && KuronyxCaptcha.enabled) {
+          payload['cf-turnstile-response'] = KuronyxCaptcha.token(enqForm);
+          if (!payload['cf-turnstile-response']) throw new Error('Please complete the verification check');
+        }
+        // KuronyxPost.send never throws and never hands back a raw parser/network message (see js/post-json.js).
+        const result = await KuronyxPost.send('/php/send-enquiry.php', payload);
+        // A Turnstile token works once, whatever the answer: get a fresh one so a retry is not refused.
+        if (window.KuronyxCaptcha) KuronyxCaptcha.reset(enqForm);
+        if (!result.ok) throw new Error(result.message);
 
         enqForm.classList.add('is-ok');
         enqBtn.querySelector('.label').textContent = 'Sent';
@@ -1266,6 +1297,8 @@
     });
   }
 </script>
+<script src="js/captcha.js"></script>
+<script src="js/post-json.js"></script>
 <script src="js/subscribe.js"></script>
 </body>
 </html>
